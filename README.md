@@ -394,7 +394,7 @@ Examine the command line arguments passed to the credential dumping tool. Look f
 
 **Identified Permissions:**
 
-"mm.exe" privilege::debug sekurlsa::logonpasswords exit
+sekurlsa::logonpasswords
 
 Nov 20, 2025 2:08:26 AM
 
