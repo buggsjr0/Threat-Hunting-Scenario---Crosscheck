@@ -1,1316 +1,669 @@
+<img width="740" height="1110" alt="image" src="https://github.com/user-attachments/assets/09b44f4a-1670-4804-8009-5287751e7e8d" />
 
-<p align="center">
-  <img
-    src="https://github.com/user-attachments/assets/a4a09fc7-07b8-419e-b324-50670881501f"
-    width="1200"
-    alt="Threat Hunt Cover Image"
-  />
-</p>
+# 🕵️‍♀️ Threat Hunt Report: **Port of Entry**
+INCIDENT BRIEF - Azuki Import/Export - 梓貿易株式会社 
+<br>
+SITUATION: Competitor undercut our 6-year shipping contract by exactly 3%. Our supplier contracts and pricing data appeared on underground forums.
+<br>
+COMPANY: Azuki Import/Export Trading Co. - 23 employees, shipping logistics Japan/SE Asia
+<br>
+EVIDENCE AVAILABLE: Microsoft Defender for Endpoint logs
+<br>
+Analyst: Fredrick Wilson
+<br>
+Date Completed: 11/25/2025
+<br>
+Environment Investigated: 
+Azure Logs via Microsoft Defender
+<br>
+Timeframe: 11/20/2025
+<br>
+## 🧠 Scenario Overview
 
-
-
-
-
-
-# 🛡️ Threat Hunt Report – Year-End Bonus Data Theft Campaign
-
----
-
-## 📌 Executive Summary
-
-This threat hunt uncovered a sophisticated multi-stage data theft operation targeting sensitive HR compensation and employee review data across multiple systems within the environment. What began as compromised credentials on workstation **sys1-dept** evolved into a coordinated campaign spanning five compromised endpoints, systematic targeting of year-end bonus matrices, employee scorecards, and candidate packages, culminating in staged data prepared for exfiltration.
-
-The adversary demonstrated advanced operational security through methodical reconnaissance, dual persistence mechanisms, anti-forensic log clearing, and phased data collection across departmental boundaries. The attacker's focus on approved compensation data, combined with lateral movement to HR and Finance systems, indicates corporate espionage, insider threat activity, or ransomware operators seeking maximum leverage for extortion.
-
-This investigation highlights how attackers can successfully exploit valid credentials to blend into legitimate business operations, systematically pillage sensitive data repositories, and prepare for bulk exfiltration while evading real-time detection through off-hours operations and social engineering file naming conventions.
+Competitor undercut our 6-year shipping contract by exactly 3%. Our supplier contracts and pricing data appeared on underground forums.
 
 ---
 
-## 🎯 Hunt Objectives
 
-- Identify malicious activity across compromised endpoints and network telemetry
-- Map attacker progression from initial access through data staging
-- Correlate adversary behavior to MITRE ATT&CK techniques
-- Document evidence, detection gaps, and remediation priorities
-- Reconstruct the full attack timeline across multiple compromised systems
+## Chronological Timeline of Compromise
 
----
+All events occurred on host **azuki-sl** on **November 20, 2025** (timestamps approximate in UTC/local as shown in logs; primary activity between ~01:37 AM and ~02:11 AM).
 
-## 🧭 Scope & Environment
-
-- **Environment:** Corporate Windows endpoint environment with HR, IT, and Finance departmental systems
-- **Data Sources:** Microsoft Defender for Endpoint Advanced Hunting
-  - DeviceProcessEvents
-  - DeviceNetworkEvents
-  - DeviceFileEvents
-  - DeviceRegistryEvents
-  - DeviceEvents (SensitiveFileRead telemetry)
-  - IdentityLogonEvents
-- **Timeframe:** 2025-12-01 03:13:33 UTC → 2025-12-04 08:29:21 UTC
-- **Compromised Systems Identified:**
-  - sys1-dept (Initial Access - Departmental Workstation)
-  - YE-HELPDESKTECH (IT Helpdesk System)
-  - YE-HRPLANNER (HR Planning Workstation)
-  - YE-FINANCEREVIE (Finance Review Workstation)
-  - main1-srvr (Primary Server - Centralized Data Repository)
-
----
-
-## 📚 Table of Contents
-
-- [🧠 Hunt Overview](#-hunt-overview)
-- [🧬 MITRE ATT&CK Summary](#-mitre-attck-summary)
-- [🔥 Executive MITRE ATT&CK Heatmap](#-executive-mitre-attck-heatmap)
-- [📊 Executive Takeaway](#-executive-takeaway)
-- [⏱️ Attack Timeline](#️-attack-timeline)
-- [🔍 Flag Analysis](#-flag-analysis)
-  - [Phase 1: Initial Access & Reconnaissance (Flags 1-4)](#-flag-1)
-  - [Phase 2: Data Discovery & Staging (Flags 5-7)](#-flag-5)
-  - [Phase 3: Persistence Establishment (Flags 8-9)](#-flag-8)
-  - [Phase 4: Lateral Movement & Expanded Collection (Flags 10-13)](#-flag-10)
-  - [Phase 5: Secondary Staging & Exfiltration Prep (Flags 14-16)](#-flag-14)
-  - [Phase 6: Server Compromise & Final Collection (Flags 17-22)](#-flag-17)
-- [🚨 Detection Gaps & Recommendations](#-detection-gaps--recommendations)
-- [🧾 Final Assessment](#-final-assessment)
-- [📎 Analyst Notes](#-analyst-notes)
-
----
-
-## 🧠 Hunt Overview
-
-This threat hunt reconstructed a full-spectrum data theft operation beginning with valid account compromise on **sys1-dept** and expanding through coordinated lateral movement to IT, HR, and Finance departmental systems, culminating in centralized collection on **main1-srvr**. The adversary demonstrated sophisticated tradecraft including:
-
-**Operational Characteristics:**
-- **Hands-on-keyboard activity:** Manual file browsing via notepad.exe, Explorer.exe
-- **Phased collection:** 3+ day operation with distinct collection waves
-- **Social engineering:** File and task names mimicking legitimate HR/payroll operations
-- **Operational security:** Off-hours activity (3-7 AM local time), log clearing, connectivity pre-flight testing
-- **Systematic targeting:** Repeated access to the same employee files (JavierR) across systems
-
-**Attack Progression:**
-1. Initial remote access using compromised credentials (account: 5y51-d3p7)
-2. Execution of social-engineered PowerShell payload (PayrollSupportTool.ps1)
-3. System and file reconnaissance to map sensitive data locations
-4. Discovery and staging of bonus matrices, employee reviews, candidate packages
-5. Dual persistence via registry Run keys and scheduled tasks
-6. Lateral movement to 4 additional systems via internal pivot point (192.168.0.110)
-7. Expanded collection from HR Planning, IT Helpdesk, Finance Review workstations
-8. Server compromise (main1-srvr) for access to centralized archive repositories
-9. Final staging of year-end review packages
-10. Connectivity testing via httpbin.org before planned exfiltration
-11. Anti-forensic activity (PowerShell operational log clearing)
-
-This hunt matters because it demonstrates how determined attackers with valid credentials can systematically identify, access, and prepare high-value HR data for theft while evading perimeter defenses and blending into normal business operations. The focus on approved compensation data and systematic cross-departmental collection indicates sophisticated threat actors with specific intelligence objectives rather than opportunistic malware.
-
----
-
-## 🧬 MITRE ATT&CK Summary
-
-| Flag | Technique Category | MITRE ID | Priority | System |
-|-----:|-------------------|----------|----------|---------|
-| 1 | Initial Access – Valid Accounts | T1078 | Critical | sys1-dept |
-| 2 | Remote Services – Remote Desktop | T1021 | High | sys1-dept |
-| 3 | Execution – Command & Scripting Interpreter (PowerShell) | T1059.001 | High | sys1-dept |
-| 4 | Discovery – System Owner/User Discovery | T1033 | Medium | sys1-dept |
-| 5 | Discovery – File and Directory Discovery | T1083 | High | sys1-dept |
-| 6 | Collection – Archive Collected Data | T1560.001 | High | sys1-dept |
-| 7 | Command and Control – Application Layer Protocol | T1071 | High | sys1-dept |
-| 8 | Persistence – Registry Run Keys | T1547.001 | High | sys1-dept |
-| 9 | Persistence – Scheduled Task | T1053.005 | High | sys1-dept |
-| 10 | Lateral Movement – Remote Services | T1021 | Critical | sys1-dept |
-| 11 | Lateral Movement – Internal Pivot | T1570 | Critical | sys1-dept |
-| 12 | Discovery – User-Level File Access | T1083 | Medium | sys1-dept |
-| 13 | Collection – Data from Local System (Sensitive) | T1005 | Critical | sys1-dept |
-| 14 | Collection – Data Staging | T1074.001 | High | sys1-dept |
-| 15 | Command and Control – Exfiltration Testing | T1048 | High | sys1-dept |
-| 16 | Defense Evasion – Indicator Removal (Clear Logs) | T1070.001 | Critical | sys1-dept |
-| 17 | Lateral Movement – Secondary System Compromise | T1021 | Critical | main1-srvr |
-| 18 | Collection – Sensitive Archive Access | T1005 | Critical | main1-srvr |
-| 19 | Lateral Movement – Finance System Access | T1021 | Critical | main1-srvr |
-| 20 | Collection – Centralized Archive Staging | T1074.001 | Critical | main1-srvr |
-| 21 | Collection – Final Phase Staging Timing | T1074 | High | main1-srvr |
-| 22 | Command and Control – Final Exfiltration Test | T1048 | Critical | main1-srvr |
-
----
-
-## 🔥 Executive MITRE ATT&CK Heatmap
-
-| ATT&CK Phase | Techniques Observed | Severity | Analyst Notes |
-|--------------|-------------------|----------|---------------|
-| Initial Access | Valid Accounts (T1078), Remote Services | 🔴 Critical | Compromised credentials from external IP 4.150.155.223 |
-| Execution | PowerShell Execution (T1059.001), Social Engineering | 🔴 Critical | PayrollSupportTool.ps1 with execution policy bypass |
-| Persistence | Registry Run Keys (T1547.001), Scheduled Tasks (T1053.005) | 🔴 Critical | Dual persistence mechanisms established |
-| Privilege Escalation | Valid Accounts | 🟠 High | Account 5y51-d3p7 likely has elevated privileges |
-| Defense Evasion | Log Clearing (T1070.001), Social Engineering Names | 🔴 Critical | PowerShell operational logs deliberately cleared |
-| Credential Access | Registry Inspection, Token Discovery | 🟠 Medium | Preparation for credential reuse evident |
-| Discovery | File Discovery (T1083), User Discovery (T1033) | 🟠 High | Systematic enumeration of HR directories |
-| Lateral Movement | Remote Services (T1021), Internal Pivoting (T1570) | 🔴 Critical | 5 systems compromised across 3 departments |
-| Collection | Data Staging (T1074), Sensitive File Access (T1005) | 🔴 Critical | Targeted collection of bonus/compensation data |
-| Command & Control | Application Layer Protocol (T1071), Testing Services | 🔴 High | httpbin.org used for exfiltration pre-flight |
-| Exfiltration | Data Transfer (Preparation Phase) | 🟠 High | Staged but not confirmed exfiltrated |
-
----
-
-## 📊 Executive Takeaway
-
-This intrusion represents a **sophisticated, multi-phase data theft operation** targeting the organization's most sensitive HR and compensation data.
-
-**Key Findings:**
-- **Scope:** 5 compromised systems across IT, HR, and Finance departments
-- **Duration:** 3+ day operation with phased collection activity
-- **Target:** Year-end bonus matrices, employee performance reviews, candidate packages
-- **Method:** Valid account compromise, social engineering, systematic lateral movement
-- **Status:** Data staged and prepared for exfiltration; actual data loss not confirmed but highly likely
-
-**Critical Indicators:**
-1. **Systematic targeting of specific data types** across multiple systems indicates intelligence-driven operation
-2. **Dual persistence mechanisms** demonstrate intent for long-term access
-3. **Anti-forensic activity** (log clearing) shows sophistication and operational security awareness
-4. **Off-hours operations** (3-7 AM) designed to evade real-time detection
-5. **Social engineering naming** (PayrollSupportTool, BonusReviewAssist) successfully evaded initial scrutiny
-
-**Business Impact:**
-- **Confidential compensation data** compromised, including executive-level bonus allocations
-- **Employee performance reviews** accessed, creating privacy and legal exposure
-- **Candidate hiring packages** stolen, impacting competitive recruitment intelligence
-- **Multiple department credentials** likely compromised, enabling future lateral movement
-- **Regulatory exposure** under data protection laws (GDPR, CCPA) for employee PII theft
-
-**Immediate Actions Required:**
-1. Reset credentials for account 5y51-d3p7 and all accounts that authenticated from 192.168.0.110
-2. Isolate and forensically image all 5 compromised systems
-3. Review all scheduled tasks and registry Run keys across the environment
-4. Implement emergency monitoring for httpbin.org and similar testing services
-5. Notify legal/compliance teams of potential data breach
-6. Conduct damage assessment to determine if exfiltration occurred
-
-Early detection through correlation of remote session telemetry, sensitive file access patterns, and off-hours PowerShell activity is critical to disrupting similar intrusions before they achieve their objectives.
-
----
-
-## ⏱️ Attack Timeline
-
-### December 1, 2025
-**03:13:33 UTC** - Initial access established on sys1-dept via compromised account 5y51-d3p7
-
-### December 3, 2025
-**01:24:53 UTC** - First outbound connection to external IP 4.150.155.223 from remote session  
-**06:07:15 UTC** - PayrollSupportTool.ps1 executed with execution policy bypass  
-**06:12:03 UTC** - Reconnaissance: `whoami /all` executed  
-**06:27:10 UTC** - First data staging: export_stage.zip created  
-**06:27:31 UTC** - Connectivity test: Connection to example.com  
-**06:27:59 UTC** - Persistence: Registry Run key established  
-**06:46:30 UTC** - Lateral movement: YE-HELPDESKTECH accesses Review_JavierR.lnk  
-**06:47:40 UTC** - Persistence: Scheduled task "BonusReviewAssist" created  
-**07:24:42 UTC** - Discovery: BonusMatrix_Draft_v3.xlsx.lnk accessed  
-**07:25:15 UTC** - File access: Review_JavierR.lnk opened via notepad  
-**07:25:39 UTC** - **Critical:** BonusMatrix_Q4_Approved.xlsx sensitive file read  
-**07:26:03 UTC** - Lateral movement: YE-HRPLANNER accesses Q4Candidate_Pack.zip  
-**07:26:28 UTC** - Connectivity test: Connection to httpbin.org (18.214.194.42)  
-**08:18:58 UTC** - Anti-forensics: PowerShell operational logs cleared via wevtutil
-
-### December 4, 2025
-**03:11:58 UTC** - Server compromise: PowerShell process created on main1-srvr  
-**03:14:03 UTC** - Lateral movement: YE-FINANCEREVIE accesses Scorecard_JavierR.txt  
-**03:15:29 UTC** - Final staging: YearEnd_ReviewPackage_2025.zip created on main1-srvr  
-**03:15:48 UTC** - Final connectivity test: httpbin.org (54.83.21.156) from main1-srvr  
-**10:57:09 UTC** - Remote session from external IP 150.171.28.11 detected on main1-srvr
-
-## 🔍 Flag Analysis
-
-_All flags below are collapsible for readability._
-
----
-
-<details>
-<summary id="-flag-1">🚩 <strong>Flag 1: Initial Access via Compromised Service Account</strong></summary>
-
-### 🎯 Objective
-Establish initial foothold on target endpoint using compromised credentials.
-
-### 📌 Finding
-ProcessCreated event observed on sys1-dept endpoint initiated by account 5y51-d3p7. The activity represents the first recorded action in the attack chain, indicating successful credential compromise and initial access to the environment.
-
-### 🔍 Evidence
-| Field | Value |
-|------|-------|
-| Host | sys1-dept |
-| Timestamp (UTC) | 12/1/2025, 3:13:33.708 AM |
-| ActionType | ProcessCreated |
-| DeviceId | 1d0e12b505d61c7eb1f1fd7842d905c99f6ae26a |
-| Initiating Account | sys1-dept\5y51-d3p7 |
-| AccountSid | S-1-5-21-805396643-3920266184-3816603331-500 |
-| TenantId | 60c7f53e-249a-4077-b68e-55a4ae877d7c |
-
-### 💡 Why it matters
-This event marks the initial access phase of the intrusion, aligning with **MITRE ATT&CK T1078 (Valid Accounts)**. The use of account 5y51-d3p7 suggests credential theft or compromise occurred prior to this activity. The timing (early morning hours) and the fact this is the earliest observed event in the timeline indicates this is the attacker's entry point. The AccountSid ending in -500 indicates a built-in Administrator account, representing high-privilege access from the start of the compromise.
-
-### 🖼️ Screenshot
-<img width="883" height="225" alt="image" src="https://github.com/user-attachments/assets/78aeda9a-e124-4750-9002-05abdbd14c65" />
+| **Time (approx.)**       | **Flag** | **Action Observed**                          | **Key Evidence**                                                                 |
+|--------------------------|----------|----------------------------------------------|----------------------------------------------------------------------------------|
+| 2025-11-20 01:37 AM      | Flag 18  | Execution - Malicious Script                 | PowerShell script wupdate.ps1 executed to initiate attack chain                  |
+| 2025-11-20 01:37 AM      | Flag 10  | Command & Control - Initial Beacon           | Outbound connection from malicious process (svchost.exe) to C2 IP 78.141.196.6 on port 443 |
+| 2025-11-20 ~02:05 AM     | Flag 4   | Defense Evasion - Malware Staging Directory  | Creation of hidden directory C:\ProgramData\WindowsCache                         |
+| 2025-11-20 02:06 AM      | Flag 7   | Defense Evasion - Download Utility Abuse     | certutil.exe used to download malicious payload                                  |
+| 2025-11-20 02:07 AM      | Flag 12  | Credential Access - Credential Theft Tool    | Download and staging of renamed Mimikatz executable mm.exe                       |
+| 2025-11-20 02:07 AM      | Flag 8   | Persistence - Scheduled Task Creation        | Scheduled task "Windows Update Check" created                                    |
+| 2025-11-20 02:07 AM      | Flag 9   | Persistence - Scheduled Task Target          | Task configured to execute C:\ProgramData\WindowsCache\svchost.exe               |
+| 2025-11-20 02:08 AM      | Flag 13  | Credential Access - Memory Extraction        | mm.exe executed with "privilege::debug sekurlsa::logonpasswords exit"            |
+| 2025-11-20 ~02:08 AM     | Flag 14  | Collection - Data Staging Archive            | Creation of export-data.zip (and other .zip files like VMAgentLogs.zip) in staging directory |
+| 2025-11-20 02:09 AM      | Flag 15  | Exfiltration - Exfiltration Channel          | curl.exe used to upload export-data.zip via HTTPS to Discord                     |
+| 2025-11-20 02:10 AM      | Flag 19  | Lateral Movement - Secondary Target          | RDP connection attempted to internal IP 10.1.0.188                               |
+| 2025-11-20 02:10 AM      | Flag 20  | Lateral Movement - Remote Access Tool        | mstsc.exe launched for remote desktop to 10.1.0.188                              |
+| 2025-11-20 02:11 AM      | Flag 16  | Anti-Forensics - Log Tampering               | wevtutil.exe used to clear Security log (and possibly others)                    |
+| 2025-11-20 (post-activity)| Flag 17 | Impact - Persistence Account                 | Hidden local administrator account "support" created and added to Administrators group |
+| 2025-11-18 to 2025-11-21 | Flag 1   | Initial Access - Remote Access Source        | RDP connection from external IP 88.97.178.12                                     |
+| 2025-11-18 to 2025-11-21 | Flag 2   | Initial Access - Compromised User Account    | Successful logon using account kenji.sato                                        |
+| 2025-11-19 to 2025-11-21 | Flag 3   | Discovery - Network Reconnaissance           | arp -a executed to enumerate local network                                       |
+| 2025-11-19 to 2025-11-21 | Flag 5   | Defense Evasion - File Extension Exclusions  | 3 file extensions added to Windows Defender exclusions                           |
+| 2025-11-19 to 2025-11-21 | Flag 6   | Defense Evasion - Temporary Folder Exclusion | Exclusion added for Temp folder                                                  |
+| 2025-11-19 to 2025-11-21 | Flag 11  | Command & Control - C2 Communication Port     | Persistent C2 traffic over port 443                                              |
 
 
-### 🛠️ Detection Recommendation
-**Hunting Tip:**  
-Pivot on the compromised account (5y51-d3p7) across all logs to identify the full scope of unauthorized activity. Query authentication logs (IdentityLogonEvents) to determine where and when this account authenticated prior to this event. Look for anomalous logon patterns such as impossible travel, unusual source IPs, or logons outside normal business hours. Correlate process creation events with this account to map the attack chain progression.
-
-</details>
-
-
----
-
-<details>
-<summary id="-flag-2">🚩 <strong>Flag 2: Remote Session Source Attribution</strong></summary>
-
-### 🎯 Objective
-Identify the remote session source information tied to the initiating access on the first endpoint.
-
-### 📌 Finding
-Remote session activity detected on sys1-dept originating from external IP address 192.168.0.110. The session was established under the compromised account 5y51-d3p7, with the `IsInitiatingProcessRemoteSession` flag confirming remote execution context. This metadata reveals the attacker's source infrastructure used to access the compromised endpoint.
-
-### 🔍 Evidence
-| Field | Value |
-|------|-------|
-| Host | sys1-dept |
-| Timestamp (UTC) | 12/3/2025, 1:24:53.664 AM |
-| InitiatingProcessAccountName | 5y51-d3p7 |
-| IsInitiatingProcessRemoteSession | true |
-| LocalIP | 10.0.0.12 |
-| RemoteIPType | Public |
-| RemoteIP | 192.168.0.110 |
-
-### 💡 Why it matters
-This finding maps to **MITRE ATT&CK T1021 (Remote Services)** and provides critical attribution intelligence. The remote IP 4.150.155.223 represents the attacker's infrastructure or compromised staging system used to access the environment. Remote session metadata is essential for identifying the attack origin, blocking active threat actor infrastructure, and correlating activity across multiple incidents. The public IP classification confirms external access rather than lateral movement from another internal system. This data point enables defenders to pivot across all telemetry sources to identify the full scope of connections from this malicious source.
-
-### 🔧 KQL Query Used
-```kql
-let startTime = todatetime('2025-12-01T03:13:33.7087736Z');
-let endTime = todatetime('2025-12-03T08:29:21.12468Z');
-let badUser = "5y51-d3p7";
-let firstCompromisedDevice = "sys1-dept";
-DeviceNetworkEvents
-| where DeviceName == firstCompromisedDevice
-| where InitiatingProcessAccountName == badUser
-| where TimeGenerated >= startTime + 24h
-| project TimeGenerated, DeviceName, InitiatingProcessAccountName, IsInitiatingProcessRemoteSession, LocalIP, RemoteIPType, RemoteIP
-```
-
-### 🖼️ Screenshot
-<img src="uploads/1769913464418_image.png">
-
-### 🛠️ Detection Recommendation
-**Hunting Tip:**  
-Pivot on the source IP 4.150.155.223 across all network telemetry to identify additional compromised accounts or systems. Query IdentityLogonEvents and DeviceLogonEvents for authentication attempts from this IP. Hunt for remote session indicators (`IsInitiatingProcessRemoteSession == true`) combined with external IPs to detect similar attack patterns. Correlate with threat intelligence feeds to determine if this IP is known malicious infrastructure. Check firewall logs for persistence of connections from this source and identify any other internal systems contacted.
-
-</details>
-
----
-
-
-<details>
-<summary id="-flag-3">🚩 <strong>Flag 3: Support Script Execution Confirmation</strong></summary>
-
-### 🎯 Objective
-Confirm execution of a support-themed PowerShell script from a user-accessible directory.
-
-### 📌 Finding
-PowerShell execution detected on sys1-dept with an execution policy bypass executing a script named "PayrollSupportTool.ps1" from the user's Downloads directory. The command line indicates deliberate evasion of PowerShell security controls to execute the malicious payload.
-
-### 🔍 Evidence
-| Field | Value |
-|------|-------|
-| Host | sys1-dept |
-| Timestamp (UTC) | 12/3/2025, 6:07:15.565 AM |
-| AccountName | 5y51-d3p7 |
-| ProcessCommandLine | "powershell.exe" -ExecutionPolicy Bypass -File C:\users\5y51-D3p7\Downloads\PayrollSupportTool.ps1 |
-
-### 💡 Why it matters
-This activity represents **MITRE ATT&CK T1059.001 (Command and Scripting Interpreter: PowerShell)** and **T1204.002 (User Execution: Malicious File)**. The use of `-ExecutionPolicy Bypass` is a classic defense evasion technique that circumvents PowerShell's built-in script execution restrictions. The script name "PayrollSupportTool.ps1" follows social engineering naming conventions designed to appear legitimate. Execution from the Downloads folder indicates the script was likely delivered via phishing, malicious download, or copied during the remote session. This marks a critical escalation point where the attacker transitions from remote access to executing custom tooling on the compromised system.
-
-### 🔧 KQL Query Used
-```kql
-let startTime = todatetime('2025-12-01T06:27:31.1857946Z');
-let endTime = todatetime('2025-12-03T08:29:21.12468Z');
-let badUser = "5y51-d3p7";
-let firstCompromisedDevice = "sys1-dept";
+### Starting Point – 
 DeviceProcessEvents
-| where DeviceName == firstCompromisedDevice
-| where AccountName == badUser
-| where TimeGenerated between (startTime .. endTime)
-| where ProcessCommandLine has "powershell"
-| project TimeGenerated, DeviceName, ProcessCommandLine
+| where DeviceName == "azuki-sl"
+| where Timestamp between (datetime(2025-11-19) .. datetime(2025-11-20))
+
+**Identified System:**
+azuki-sl 
+
+
+### 🪪 Flag 1 – INITIAL ACCESS - Remote Access Source
+
+**Objective:**
+Remote Desktop Protocol connections leave network traces that identify the source of unauthorised access. Determining the origin helps with threat actor attribution and blocking ongoing attacks.
+
+**What to Hunt:**
+Query logon events for interactive sessions from external sources during the incident timeframe.
+
+**Identified Activity:**
+88.97.178.12 is the source IP address of the Remote Desktop Protocol Connection
+
+**Why It Matters:**
+The IP 88.97.178.12 is the external address the attacker used to connect via Remote Desktop Protocol (RDP). Pinpointing this source gives defenders a clear starting point: they can block the IP at the firewall, check threat intel to see if it’s linked to known actors or proxy services, and correlate it with other incidents. Knowing the exact entry vector speeds up containment and helps answer “who might be behind this?” (MITRE ATT&CK T1133 – External Remote Services).
+
+**KQL Query Used:**
 ```
+DeviceLogonEvents
+| where DeviceName == "azuki-sl"
+| where Timestamp between (datetime(2025-11-18) .. datetime(2025-11-21))
+| where RemoteIP contains "."
+| where ActionType == "LogonSuccess"
+| project Timestamp, ActionType, AccountName,  RemoteIP, RemoteIPType, RemoteDeviceName
+| order by Timestamp asc
+```
+<img width="1739" height="382" alt="image" src="https://github.com/user-attachments/assets/0a155b6a-d56c-477c-9cf5-6f8f08e15e52" />
 
-### 🖼️ Screenshot
-<img src="uploads/1769915136997_image.png">
 
-### 🛠️ Detection Recommendation
-**Hunting Tip:**
-Hunt for PowerShell executions with `-ExecutionPolicy Bypass`, `-ep bypass`, or `-exec bypass` flags across the environment. Query DeviceFileEvents to identify when PayrollSupportTool.ps1 was created or modified to determine delivery method. Extract and analyze the script contents from endpoint or backup sources. Pivot on Downloads directory executions combined with script file extensions (.ps1, .bat, .vbs, .js) to identify similar malicious script activity. Look for child processes spawned by this PowerShell execution to map post-exploitation activity.
 
-</details>
+### 🛰️ Flag 2 – INITIAL ACCESS - Compromised User Account
 
----
+**Objective:**
+Identifying which credentials were compromised determines the scope of unauthorised access and guides remediation efforts, including password resets and privilege reviews.
 
-<details>
-<summary id="-flag-4">🚩 <strong>Flag 4: System Reconnaissance Initiation</strong></summary>
+**What to Hunt:**
+Focus on the account that authenticated during the suspicious remote access session. Cross-reference the logon event timestamp with the external IP connection.
 
-### 🎯 Objective
-Identify the first reconnaissance action used to gather host and user context.
+**Identified User Account:**
+kenji.sato
 
-### 📌 Finding
-Execution of whoami.exe detected on sys1-dept with the /all parameter, representing the attacker's initial reconnaissance command to enumerate security context. This command provides comprehensive information about the current user's privileges, group memberships, and security identifiers.
+**Why It Matters:**
+The account kenji.sato was the valid credential the attacker used to log in successfully. This reveals the initial foothold: defenders can immediately disable or reset the account, investigate how the password was obtained (phishing, reuse from a breach, etc.), and check for similar compromises across the organization. Using legitimate accounts lets attackers blend in, making this a critical indicator of credential compromise (MITRE ATT&CK T1078 – Valid Accounts).
 
-### 🔍 Evidence
-| Field | Value |
-|------|-------|
-| Host | sys1-dept |
-| Timestamp (UTC) | 12/3/2025, 6:12:03.789 AM |
-| DeviceName | sys1-dept |
-| ProcessCommandLine | "whoami.exe" /all |
+**KQL Query Used**
+```
+DeviceLogonEvents
+| where DeviceName == "azuki-sl"
+| where Timestamp between (datetime(2025-11-18) .. datetime(2025-11-21))
+| where RemoteIP contains "."
+| where ActionType == "LogonSuccess"
+| project Timestamp, ActionType, AccountName,  RemoteIP, RemoteIPType, RemoteDeviceName
+| order by Timestamp asc
+```
+<img width="1739" height="382" alt="image" src="https://github.com/user-attachments/assets/346167c5-d6b6-4374-a139-d1db62b494b6" />
 
-### 💡 Why it matters
-This activity aligns with **MITRE ATT&CK T1033 (System Owner/User Discovery)** and **T1069 (Permission Groups Discovery)**. The `whoami /all` command is a standard post-exploitation reconnaissance technique used to assess current privilege level, group memberships, security tokens, and integrity levels. This information guides the attacker's next moves, including privilege escalation paths, lateral movement targets, and understanding what actions the compromised account can perform. The timing approximately 5 minutes prior to the PowerShell script execution suggests this was executed manually by the attacker to assess the environment before deploying additional tooling.
 
-### 🔧 KQL Query Used
-```kql
-let startTime = todatetime('2025-12-01T06:27:31.1857946Z');
-let endTime = todatetime('2025-12-03T08:29:21.12468Z');
-let badUser = "5y51-d3p7";
-let firstCompromisedDevice = "sys1-dept";
+
+### 📄 Flag 3 – DISCOVERY - Network Reconnaissance
+
+**Objective:**
+Look for commands that reveal local network devices and their hardware addresses.
+
+**What to Hunt:**
+Look for file access involving keywords like board, financial, or crypto — especially in user folders. Check DeviceProcessEvents for network enumeration utilities executed after initial access.
+
+**Identified Command:**
+"ARP.EXE" -a
+
+**Why It Matters:**
+Running arp -a maps out nearby devices on the local network, giving the attacker a picture of potential next targets. Spotting this early reconnaissance shows the attacker is actively exploring the environment and planning lateral movement, allowing defenders to anticipate and monitor those systems before deeper access occurs (MITRE ATT&CK T1018 – Remote System Discovery).
+
+**KQL Query Used:**
+```
 DeviceProcessEvents
-| where DeviceName == firstCompromisedDevice
-| where AccountName == badUser
-| where TimeGenerated between (startTime .. endTime)
-| where ProcessCommandLine has_any ("whoami", "net user", "net group", "query user")
-| project TimeGenerated, DeviceName, ProcessCommandLine
-| order by TimeGenerated asc
+| where DeviceName == "azuki-sl"
+| where Timestamp between (startofday(datetime(2025-11-19)) .. endofday(datetime(2025-11-21)))
+| project Timestamp, DeviceName, ProcessCommandLine, FolderPath, AccountName, IsProcessRemoteSession
 ```
+<img width="1709" height="488" alt="image" src="https://github.com/user-attachments/assets/2321e140-cf3b-4c28-ae5a-91a90feb3a6c" />
 
-### 🖼️ Screenshot
-<img src="uploads/1769915438765_image.png">
 
-### 🛠️ Detection Recommendation
-**Hunting Tip:**
-Hunt for native Windows reconnaissance binaries (whoami.exe, net.exe, ipconfig.exe, systeminfo.exe, tasklist.exe) executed within remote sessions or by service accounts. Look for rapid sequential execution of multiple discovery commands within short time windows, indicating scripted or manual enumeration. Correlate whoami execution with subsequent privilege escalation attempts or lateral movement activity. Query for command-line parameters like /all, /priv, or /groups that indicate thorough enumeration. Stack count executions by AccountName to identify accounts performing abnormal discovery activity.
 
-</details>
+### ⏱️ Flag 4 – DEFENCE EVASION - Malware Staging Directory
 
----
+**Objective:**
+Attackers establish staging locations to organise tools and stolen data. Identifying these directories reveals the scope of compromise and helps locate additional malicious artefacts.
 
-<details>
-<summary id="-flag-5">🚩 <strong>Flag 5: Sensitive Bonus-Related File Exposure</strong></summary>
+**What to Hunt:**
+Search for newly created directories in system folders that were subsequently hidden from normal view. Look for mkdir or New-Item commands followed by attrib commands that modify folder attributes.
 
-### 🎯 Objective
-Identify the first sensitive year-end bonus-related file that was accessed during exploration.
+**PRIMARY Staging Directory Found:**
+C:\ProgramData\WindowsCache
+Nov 20, 2025 2:05:30 AM
 
-### 📌 Finding
-FileCreated event detected on sys1-dept for a file named "BonusMatrix_Draft_v3.xlsx.lnk" initiated by Explorer.exe under the compromised account. This shortcut file indicates the attacker discovered and interacted with sensitive compensation data, creating a link that could be used for later access or as evidence of file discovery.
+**Why It Matters:**
+Creating C:\ProgramData\WindowsCache as a hidden staging folder lets the attacker store tools in a location that looks semi-legitimate and isn’t routinely checked. Identifying these non-standard directories reveals where payloads are hidden and helps build detection rules for unusual folder creation in system paths (MITRE ATT&CK T1564 – Hide Artifacts).
 
-### 🔍 Evidence
-| Field | Value |
-|------|-------|
-| Host | sys1-dept |
-| Timestamp (UTC) | 12/3/2025, 7:24:42.960 AM |
-| ActionType | FileCreated |
-| FileName | BonusMatrix_Draft_v3.xlsx.lnk |
-| InitiatingProcess | Explorer.exe |
-| InitiatingProcessAccountName | 5y51-d3p7 |
 
-### 💡 Why it matters
-This activity represents **MITRE ATT&CK T1083 (File and Directory Discovery)** and indicates progression toward **T1005 (Data from Local System)**. The creation of a .lnk (shortcut) file suggests interactive browsing behavior through Windows Explorer, indicating hands-on-keyboard activity rather than automated tooling. The file name "BonusMatrix_Draft_v3.xlsx" clearly contains sensitive compensation information that would be high-value for corporate espionage, insider threats, or ransomware operators seeking leverage. The "Draft_v3" naming convention suggests this is working documentation that may contain unredacted or preliminary bonus allocation data. This marks the transition from system reconnaissance to targeted data discovery.
-
-### 🔧 KQL Query Used
-```kql
-let startTime = todatetime('2025-11-01T06:27:31.1857946Z');
-let endTime = todatetime('2025-12-10T08:29:21.12468Z');
-let badUser = "5y51-d3p7";
-let firstCompromisedDevice = "sys1-dept";
+**KQL Query Used:**
+```
 DeviceFileEvents
-| where DeviceName == firstCompromisedDevice
-| where InitiatingProcessAccountName == badUser
-| where TimeGenerated between (startTime .. endTime)
-| project TimeGenerated, ActionType, DeviceName, FileName, InitiatingProcessCommandLine, InitiatingProcessId, InitiatingProcessUniqueId
+| where Timestamp between (startofday(datetime(2025-11-19)) .. endofday(datetime(2025-11-21)))
+| where DeviceName == "azuki-sl"
+| where InitiatingProcessFileName contains "powershell"
 ```
-
-### 🖼️ Screenshot
-<img width="782" height="221" alt="image" src="https://github.com/user-attachments/assets/09c92ac0-7dae-4acd-8c6e-391ffd6bc749" />
+<img width="1679" height="432" alt="image" src="https://github.com/user-attachments/assets/1dd10cdd-be4d-4e5c-af6d-463cdd687371" />
 
 
-### 🛠️ Detection Recommendation
-**Hunting Tip:**
-Query DeviceFileEvents for access to files containing sensitive keywords (bonus, salary, compensation, payroll, executive) by the compromised account. Look for FileCreated actions involving .lnk files as indicators of interactive file browsing. Pivot to identify the full path of the original BonusMatrix_Draft_v3.xlsx file and check for subsequent FileRead, FileModified, or FileCopied events. Hunt for file staging activity where sensitive documents are copied to temporary directories or compressed into archives. Review network telemetry for potential exfiltration of this file to external IPs or cloud storage services.
 
-</details>
+### ⚙️ Flag 5 – DEFENCE EVASION - File Extension Exclusions
 
----
+**Objective:**
+Attackers add folder path exclusions to Windows Defender to prevent scanning of directories used for downloading and executing malicious tools. These exclusions allow malware to run undetected.
 
-<details>
-<summary id="-flag-6">🚩 <strong>Flag 6: Data Staging Activity Confirmation</strong></summary>
+**What to Hunt:**
+Search DeviceRegistryEvents for registry modifications to Windows Defender's exclusion settings. Look for the RegistryValueName field containing file extension. Count the unique file extensions added to the "Exclusions\Extensions" registry key during the attack timeline.
 
-### 🎯 Objective
-Confirm that sensitive data was prepared for movement by staging into an export/archive output.
+**Identified File Extension Excluded:**
+3
+powershell.exe -ExecutionPolicy AllSigned -NoProfile -NonInteractive -Command "& {$OutputEncoding = [Console]::OutputEncoding =[System.Text.Encoding]::UTF8;$scriptFileStream = [System.IO.File]::Open('C:\ProgramData\Microsoft\Windows Defender Advanced Threat Protection\DataCollection\8809.14144035.0.14144035-462fc402c4ea5c03148fd915012f3d7aee74f9d4\05f2c576-9ed5-41eb-9b1e-1b653eebfdff.ps1', [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read);$calculatedHash = Microsoft.PowerShell.Utility\Get-FileHash 'C:\ProgramData\Microsoft\Windows Defender Advanced Threat Protection\DataCollection\8809.14144035.0.14144035-462fc402c4ea5c03148fd915012f3d7aee74f9d4\05f2c576-9ed5-41eb-9b1e-1b653eebfdff.ps1' -Algorithm SHA256;if (!($calculatedHash.Hash -eq '25fda4c27044455e664e8c26cdd2911117493a9122c002cd9462a9ce9c677f22')) { exit 323;}; . 'C:\ProgramData\Microsoft\Windows Defender Advanced Threat Protection\DataCollection\8809.14144035.0.14144035-462fc402c4ea5c03148fd915012f3d7aee74f9d4\05f2c576-9ed5-41eb-9b1e-1b653eebfdff.ps1' }"
 
-### 📌 Finding
-FileCreated event detected for "export_stage.zip" on sys1-dept, initiated by powershell.exe under the compromised account. This archive file represents data staging activity where the attacker packaged sensitive files for exfiltration, confirming progression from discovery to collection and preparation for data theft.
+**Why It Matters:**
+Adding specific extensions to Windows Defender exclusions disables scanning for those file types, giving downloaded malware a safe landing zone. This change directly weakens endpoint protection and highlights why monitoring Defender configuration modifications is essential for catching evasion in progress (MITRE ATT&CK T1562.001 – Impair Defenses: Disable or Modify Tools).
 
-### 🔍 Evidence
-| Field | Value |
-|------|-------|
-| Host | sys1-dept |
-| Timestamp (UTC) | 12/3/2025, 6:27:10.682 AM |
-| ActionType | FileCreated |
-| FileName | export_stage.zip |
-| InitiatingProcessCommandLine | "powershell.exe" |
-| InitiatingProcessId | 5632 |
-| InitiatingProcessUniqueId | 2533274790396713 |
-
-### 💡 Why it matters
-This activity represents **MITRE ATT&CK T1560.001 (Archive Collected Data: Archive via Utility)** and **T1074.001 (Data Staged: Local Data Staging)**. The creation of a ZIP archive with the explicit name "export_stage" demonstrates clear intent to exfiltrate data. Staging files into compressed archives serves multiple adversary objectives: reducing file size for faster transfer, evading DLP controls that may not inspect compressed content, and consolidating multiple files into a single exfiltration package. The PowerShell initiation indicates the attacker used scripting to automate the compression process, likely part of the PayrollSupportTool.ps1 payload executed earlier. This marks a critical escalation from reconnaissance and discovery to active data theft preparation.
-
-### 🔧 KQL Query Used
-```kql
-let startTime = todatetime('2025-11-01T06:27:31.1857946Z');
-let endTime = todatetime('2025-12-10T08:29:21.12468Z');
-let badUser = "5y51-d3p7";
-let firstCompromisedDevice = "sys1-dept";
+**KQL Query Used:**
+```
 DeviceFileEvents
-| where DeviceName == firstCompromisedDevice
-| where InitiatingProcessAccountName == badUser
-| where TimeGenerated between (startTime .. endTime)
-| where FileName endswith ".zip" or FileName endswith ".rar" or FileName endswith ".7z"
-| project TimeGenerated, ActionType, DeviceName, FileName, InitiatingProcessCommandLine, InitiatingProcessId, InitiatingProcessUniqueId
+| where Timestamp between (startofday(datetime(2025-11-19)) .. endofday(datetime(2025-11-21)))
+| where DeviceName == "azuki-sl"
+| where InitiatingProcessParentFileName contains "sense"
 ```
+<img width="1668" height="249" alt="image" src="https://github.com/user-attachments/assets/e4227628-f81c-4c71-8509-d8867114398e" />
+<img width="1678" height="435" alt="image" src="https://github.com/user-attachments/assets/d86c2602-327d-4996-a572-65bb1b582930" />
 
-### 🖼️ Screenshot
-<img width="791" height="213" alt="image" src="https://github.com/user-attachments/assets/d329e2e9-e0e4-4570-a7ee-1529b296caf6" />
 
 
-### 🛠️ Detection Recommendation
-**Hunting Tip:**
-Hunt for archive file creation (.zip, .rar, .7z, .tar.gz) in non-standard locations or with suspicious naming patterns (export, stage, data, backup, temp). Correlate the InitiatingProcessUniqueId 2533274790396713 with DeviceProcessEvents to identify all actions taken by this specific PowerShell instance. Query DeviceFileEvents for files added to the archive immediately before creation to identify what sensitive data was packaged. Monitor for subsequent file transfer activity involving export_stage.zip via network connections, cloud uploads, or removable media. Use FileProfile enrichment to determine if the archive still exists and retrieve it for forensic analysis.
+### 💾 Flag 6: DEFENCE EVASION - Temporary Folder Exclusion
 
-</details>
+**Objective:**
+Attackers add folder path exclusions to Windows Defender to prevent scanning of directories used for downloading and executing malicious tools. These exclusions allow malware to run undetected.
 
----
+**What to Hunt:**
+Search DeviceRegistryEvents for folder path exclusions added to Windows Defender configuration. Focus on the RegistryValueName field. Look for temporary folder paths added to the exclusions list during the attack timeline. Copy the path exactly as it appears in the RegistryValueName field. The registry key contains "Exclusions\Paths" under Windows Defender configuration.
 
-<details>
-<summary id="-flag-7">🚩 <strong>Flag 7: Outbound Connectivity Test</strong></summary>
+**Identified Temporary Folder:**
 
-### 🎯 Objective
-Confirm that outbound access was tested prior to any attempted transfer.
+C:\Users\KENJI~1.SAT\AppData\Local\Temp
 
-### 📌 Finding
-PowerShell-initiated network connection detected to example.com immediately following data staging activity. The connection occurred 21 seconds after the creation of export_stage.zip, confirming the attacker tested outbound connectivity before attempting exfiltration.
+**Why It Matters:**
+Excluding the Temp folder from scans allows temporary malicious files to execute without interference. This common tactic reduces detection risk for short-lived payloads and shows the need for alerts on exclusion changes, especially to high-write locations (MITRE ATT&CK T1562.001 – Impair Defenses).
 
-### 🔍 Evidence
-| Field | Value |
-|------|-------|
-| Host | sys1-dept |
-| Timestamp (UTC) | 12/3/2025, 6:27:31.185 AM |
-| InitiatingProcessFileName | powershell.exe |
-| InitiatingProcessCommandLine | "powershell.exe" |
-| RemoteIP | 23.215.0.136 |
-| RemoteUrl | example.com |
-
-### 💡 Why it matters
-This activity represents **MITRE ATT&CK T1016 (System Network Configuration Discovery)** and pre-exfiltration testing behavior. The use of example.com as a connectivity test target is significant because it is a benign, widely-accessible domain specifically reserved for documentation and testing purposes (RFC 2606). Attackers commonly use such domains to verify outbound network access without triggering threat intelligence alerts that malicious infrastructure would generate. The 21-second gap between data staging and connectivity testing demonstrates methodical, hands-on-keyboard behavior where the attacker validated the exfiltration path before transmitting sensitive data. This pre-flight check confirms the attacker's operational security awareness and intent to exfiltrate the staged archive.
-
-### 🔧 KQL Query Used
-```kql
-let startTime = todatetime('2025-12-01T03:13:33.7087736Z');
-let endTime = todatetime('2025-12-04T06:27:10.6828355Z');
-let badUser = "5y51-d3p7";
-let firstCompromisedDevice = "sys1-dept";
-DeviceNetworkEvents
-| where DeviceName == firstCompromisedDevice
-| where InitiatingProcessAccountName == badUser
-| where TimeGenerated between (startTime .. endTime)
-| where isnotempty(RemoteIPType)
-| where isnotempty(RemoteUrl)
-| project TimeGenerated, InitiatingProcessFileName, InitiatingProcessCommandLine, RemoteIP, RemoteUrl
-| order by TimeGenerated asc
+**KQL Query Used:**
 ```
-
-### 🖼️ Screenshot
-<img width="930" height="166" alt="image" src="https://github.com/user-attachments/assets/d5875cf2-0202-4f8f-b5a1-fe05c964cf05" />
-
-
-### 🛠️ Detection Recommendation
-**Hunting Tip:**
-Monitor for connections to benign testing domains (example.com, example.org, httpbin.org, ifconfig.me) from non-administrative accounts or servers, especially when preceded by data staging activity. Hunt for PowerShell network connections that occur within short time windows after archive file creation. Correlate this connectivity test with subsequent connections to the same or different external IPs to identify the actual exfiltration destination. Stack count by RemoteUrl to identify unusual testing domains across the environment. Query for similar patterns where file archiving is followed by network connectivity tests within 1-5 minutes.
-
-</details>
-
----
-
-<details>
-<summary id="-flag-8">🚩 <strong>Flag 8: Registry-Based Persistence</strong></summary>
-
-### 🎯 Objective
-Identify evidence of persistence established via a user Run key.
-
-### 📌 Finding
-Registry modification detected in the HKEY_CURRENT_USER Run key on sys1-dept, establishing persistence for the malicious PayrollSupportTool.ps1 script. The registry value was set to execute the PowerShell payload with execution policy bypass on every user logon.
-
-### 🔍 Evidence
-| Field | Value |
-|------|-------|
-| Host | sys1-dept |
-| Timestamp (UTC) | 12/3/2025, 6:27:59.603 AM |
-| InitiatingProcessAccountName | 5y51-d3p7 |
-| ActionType | RegistryValueSet |
-| RegistryKey | HKEY_CURRENT_USER\S-1-5-21-805396643-3920266184-3816603331-500\SOFTWARE\Microsoft\Windows\CurrentVersion\Run |
-| RegistryValueData | powershell.exe -ExecutionPolicy Bypass -File "C:\Users\5y51-D3p7\Downloads\PayrollSupportTool.ps1" |
-
-### 💡 Why it matters
-This activity represents **MITRE ATT&CK T1547.001 (Boot or Logon Autostart Execution: Registry Run Keys / Startup Folder)**. Registry Run keys are one of the most common persistence mechanisms on Windows systems, ensuring the malicious script executes automatically whenever the compromised user logs on. The attacker placed the exact command used during initial execution into the persistence mechanism, maintaining the execution policy bypass to evade PowerShell restrictions. This occurs 28 seconds after the connectivity test, indicating the attacker followed a methodical checklist: stage data, test connectivity, establish persistence, then proceed with exfiltration. The use of the user-specific SID in the registry path ensures persistence survives across sessions for this specific account.
-
-### 🔧 KQL Query Used
-```kql
-let startTime = todatetime('2025-12-01T03:13:33.7087736Z');
-let endTime = todatetime('2025-12-04T06:27:10.6828355Z');
-let badUser = "5y51-d3p7";
-let firstCompromisedDevice = "sys1-dept";
 DeviceRegistryEvents
-| where TimeGenerated between (startTime .. endTime)
-| where DeviceName == firstCompromisedDevice
-| where InitiatingProcessAccountName == badUser
-| where ActionType in ("RegistryValueSet", "RegistryKeyCreated")
-| where RegistryKey has "Run"
-| project TimeGenerated, DeviceName, InitiatingProcessAccountName, ActionType, RegistryKey, RegistryValueData
+| where Timestamp between (startofday(datetime(2025-11-19)) .. endofday(datetime(2025-11-21)))
+| where DeviceName == "azuki-sl"
+
 ```
 
-### 🖼️ Screenshot
-<img width="929" height="193" alt="image" src="https://github.com/user-attachments/assets/d7c56536-a0dd-4c10-b195-d6e387b227b4" />
+<img width="1677" height="402" alt="image" src="https://github.com/user-attachments/assets/d19ed60a-9ddb-45e7-84b9-1641deef37f7" />
 
 
-### 🛠️ Detection Recommendation
-**Hunting Tip:**
-Monitor all RegistryValueSet actions under Run and RunOnce keys in both HKEY_CURRENT_USER and HKEY_LOCAL_MACHINE hives. Hunt for registry values containing PowerShell commands with execution policy bypasses, encoded commands, or scripts executing from user-writable directories like Downloads or Temp. Query for registry modifications occurring shortly after malicious script execution to identify persistence establishment patterns. Stack count RegistryValueData containing "powershell", "-enc", "-exec bypass", or suspicious file paths. Correlate registry persistence with subsequent logon events to identify when the persistence mechanism successfully triggered.
 
-</details>
+### 📎 Flag 7 – DEFENCE EVASION - Download Utility Abuse
 
----
+**Objective:**
+Legitimate system utilities are often weaponized to download malware while evading detection. Identifying these techniques helps improve defensive controls.
 
-<details>
-<summary id="-flag-9">🚩 <strong>Flag 9: Scheduled Task Persistence</strong></summary>
+**What to Hunt:**
+Look for built-in Windows tools with network download capabilities being used during the attack. Search DeviceProcessEvents for processes with command lines containing URLs and output file paths.
 
-### 🎯 Objective
-Confirm a scheduled task was created or used to automate recurring execution.
+**Identified Command**
+certutil.exe
+Nov 20, 2025 2:06:58 AM
 
-### 📌 Finding
-Scheduled task creation detected on sys1-dept using schtasks.exe to establish daily execution of the malicious PayrollSupportTool.ps1 script. The task named "BonusReviewAssist" was configured to run daily with execution policy bypass, ensuring persistent access beyond the current session.
+**Why It Matters:**
+Using certutil.exe—a built-in Windows tool—to download payloads avoids triggering alerts that third-party downloaders would cause. This living-off-the-land approach makes the activity look administrative, emphasizing why behavioral monitoring of native utilities is key (MITRE ATT&CK T1105 – Ingress Tool Transfer).
 
-### 🔍 Evidence
-| Field | Value |
-|------|-------|
-| Host | sys1-dept |
-| Timestamp (UTC) | 12/3/2025, 6:47:40.825 AM |
-| AccountName | 5y51-d3p7 |
-| ProcessCommandLine | "schtasks.exe" /Create /SC DAILY /TN BonusReviewAssist /TR "powershell.exe -ExecutionPolicy Bypass -File C:\Users\5y51-D3p7\Downloads\PayrollSupportTool.ps1" /F |
-| InitiatingProcessCommandLine | "powershell.exe" |
-| Task Name | BonusReviewAssist |
-| Schedule | DAILY |
-
-### 💡 Why it matters
-This activity represents **MITRE ATT&CK T1053.005 (Scheduled Task/Job: Scheduled Task)**. The attacker established a second persistence mechanism approximately 20 minutes after the registry Run key, demonstrating defense-in-depth from an adversary perspective. Scheduled tasks provide persistence that survives user logoff, system reboots, and even if the registry Run key is discovered and removed. The task name "BonusReviewAssist" employs social engineering to appear legitimate within a corporate environment, particularly during year-end bonus cycles. The `/F` flag indicates the attacker forcefully overwrote any existing task with the same name. The daily schedule ensures the malicious script executes repeatedly, maintaining access and potentially exfiltrating updated data on an ongoing basis.
-
-### 🔧 KQL Query Used
-```kql
-let startTime = todatetime('2025-12-01T03:13:33.7087736Z');
-let endTime = todatetime('2025-12-04T06:27:10.6828355Z');
-let badUser = "5y51-d3p7";
-let firstCompromisedDevice = "sys1-dept";
+KQL Query Used:
+```
 DeviceProcessEvents
-| where TimeGenerated between (startTime .. endTime)
-| where DeviceName == firstCompromisedDevice
-| where AccountName == badUser
-| where ProcessCommandLine has "schtasks"
-| project TimeGenerated, DeviceName, ProcessCommandLine, InitiatingProcessCommandLine
+| where DeviceName == "azuki-sl"
+| where Timestamp between (startofday(datetime(2025-11-19)) .. endofday(datetime(2025-11-21)))
+| where ProcessCommandLine contains "//"
+| project Timestamp, DeviceName, InitiatingProcessFileName, ProcessCommandLine, InitiatingProcessCommandLine, FolderPath, AccountName, IsProcessRemoteSession
 ```
 
-### 🖼️ Screenshot
-<img width="937" height="315" alt="image" src="https://github.com/user-attachments/assets/a98a4c91-7d45-4ee1-8067-2fabc624c610" />
+<img width="555" height="529" alt="image" src="https://github.com/user-attachments/assets/e2690950-e773-44b1-b292-40d35f1b3920" />
 
 
-### 🛠️ Detection Recommendation
-**Hunting Tip:**
-Monitor for schtasks.exe executions with `/Create` parameter, especially when initiated by PowerShell or script interpreters. Hunt for scheduled tasks configured to execute PowerShell with execution policy bypasses or scripts from user-writable directories. Query Security event logs (Event ID 4698) for scheduled task creation events. Stack count task names across the environment to identify suspicious naming patterns that mimic legitimate services. Correlate scheduled task creation with registry persistence mechanisms occurring within the same timeframe to identify layered persistence strategies. Use `Get-ScheduledTask` or query the Task Scheduler service to enumerate all tasks and identify those executing from non-standard paths.
 
-</details>
 
----
+### 🗂️ Flag 8 – Scheduled Task Name
 
-<details>
-<summary id="-flag-10">🚩 <strong>Flag 10: Secondary Access to Employee Scorecard Artifact</strong></summary>
+**Objective:**
+Scheduled tasks provide reliable persistence across system reboots. The task name often attempts to blend with legitimate Windows maintenance routines.
 
-### 🎯 Objective
-Identify evidence that a different remote session context accessed an employee-related scorecard file.
+**What to Hunt:**
+Search for scheduled task creation commands executed during the attack timeline. Look for schtasks.exe with the /create parameter in DeviceProcessEvents.
 
-### 📌 Finding
-File access detected for employee review artifact "Review_JavierR.lnk" on sys1-dept from a secondary remote session originating from device YE-HELPDESKTECH at IP address 192.168.0.110. This represents lateral movement from a different compromised system accessing sensitive employee performance data.
+**Identified Scheduled Task:**
+Windows Update Check
+Nov 20, 2025 2:07:46 AM
 
-### 🔍 Evidence
-| Field | Value |
-|------|-------|
-| Host | sys1-dept |
-| Timestamp (UTC) | 12/3/2025, 6:46:30.922 AM |
-| FileName | Review_JavierR.lnk |
-| IsInitiatingProcessRemoteSession | true |
-| InitiatingProcessRemoteSessionIP | 192.168.0.110 |
-| InitiatingProcessRemoteSessionDeviceName | YE-HELPDESKTECH |
+**Why It Matters:**
+The fake task “Windows Update Check” ensures the malware runs again after reboot or logon. Naming it to mimic legitimate updates helps it evade review; detecting these masquerading tasks lets defenders remove persistence quickly and improve monitoring of new scheduled tasks (MITRE ATT&CK T1053.005 – Scheduled Task).
 
-### 💡 Why it matters
-This activity represents **MITRE ATT&CK T1021 (Remote Services)** and **T1570 (Lateral Tool Transfer)**. The remote session from YE-HELPDESKTECH indicates the attacker compromised multiple systems within the environment and is conducting coordinated data collection operations. The internal IP address 192.168.0.110 confirms this is lateral movement within the network, not external access. The device naming convention "HELPDESKTECH" suggests the attacker targeted IT support infrastructure, which typically has elevated privileges and broad network access. Access to employee review files from a different system demonstrates the attacker's awareness of where sensitive HR data resides and their ability to pivot across the environment to collect it. This secondary access occurring shortly before the scheduled task creation suggests the attacker was simultaneously operating from multiple footholds.
-
-### 🔧 KQL Query Used
-```kql
-let startTime = todatetime('2025-11-01T06:27:31.1857946Z');
-let endTime = todatetime('2025-12-10T08:29:21.12468Z');
-let firstCompromisedDevice = "sys1-dept";
-DeviceFileEvents
-| where TimeGenerated between (startTime .. endTime)
-| where DeviceName == firstCompromisedDevice
-| where IsInitiatingProcessRemoteSession == true
-| where FileName has_any ("review", "scorecard", "employee", "performance")
-| project TimeGenerated, DeviceName, FileName, InitiatingProcessRemoteSessionIP, InitiatingProcessRemoteSessionDeviceName
+**KQL Query Used:**
 ```
-
-### 🖼️ Screenshot
-<img width="693" height="188" alt="image" src="https://github.com/user-attachments/assets/ca432535-b3f1-46d6-89b2-4064a58662b6" />
-
-
-### 🛠️ Detection Recommendation
-**Hunting Tip:**
-Pivot on the device name YE-HELPDESKTECH to identify all systems it has accessed and all accounts used from this device. Query DeviceLogonEvents and IdentityLogonEvents for authentication activity from 192.168.0.110 to map the full scope of lateral movement. Hunt for remote session access to file shares, especially those containing HR, financial, or executive data. Look for other employee review files accessed during this timeframe to determine the breadth of data collection. Correlate this secondary access pattern with the primary attacker activity timeline to understand if this represents a second operator or automated lateral movement tooling.
-
-</details>
-
----
-
-<details>
-<summary id="-flag-11">🚩 <strong>Flag 11: Bonus Matrix Activity by a New Remote Session Context</strong></summary>
-
-### 🎯 Objective
-Identify another remote session device name that is associated with higher level related activities later in the chain.
-
-### 📌 Finding
-File access detected for "Q4Candidate_Pack.zip" on sys1-dept from a third remote session originating from device YE-HRPLANNER at IP address 192.168.0.110. This represents continued lateral movement targeting bonus and candidate-related sensitive data from what appears to be a compromised HR planning workstation.
-
-### 🔍 Evidence
-| Field | Value |
-|------|-------|
-| Host | sys1-dept |
-| Timestamp (UTC) | 12/3/2025, 7:26:03.976 AM |
-| FileName | Q4Candidate_Pack.zip |
-| IsInitiatingProcessRemoteSession | true |
-| InitiatingProcessRemoteSessionIP | 192.168.0.110 |
-| InitiatingProcessRemoteSessionDeviceName | YE-HRPLANNER |
-
-### 💡 Why it matters
-This activity represents continued **MITRE ATT&CK T1021 (Remote Services)** and **T1005 (Data from Local System)**. The attacker has now compromised at least three systems: the initial sys1-dept endpoint, YE-HELPDESKTECH, and YE-HRPLANNER. The device naming "HRPLANNER" indicates this is a workstation used by HR personnel for planning activities, likely with access to highly sensitive compensation, hiring, and organizational planning data. The same source IP (192.168.0.110) suggests the attacker is using a central staging or pivot point to access multiple targets. The file "Q4Candidate_Pack.zip" indicates pre-packaged sensitive data, potentially containing candidate information, hiring plans, or compensation packages. This access occurred 40 minutes after the employee review file access, demonstrating systematic progression through HR-related data sources.
-
-### 🖼️ Screenshot
-<img width="915" height="199" alt="image" src="https://github.com/user-attachments/assets/e7df45c7-be4d-4b76-a420-ae7c7588e678" />
-
-
-### 🛠️ Detection Recommendation
-**Hunting Tip:**
-Investigate the 192.168.0.110 source IP to identify what system is serving as the pivot point for these lateral movement operations. Query all file access events from both YE-HELPDESKTECH and YE-HRPLANNER to determine the full scope of compromised HR infrastructure. Hunt for authentication activity showing how the attacker gained access to these HR systems, particularly focusing on credential dumping or pass-the-hash techniques. Look for data staging and exfiltration attempts involving files accessed from these remote sessions. Correlate the timeline of lateral movement with network connections to identify if data from multiple systems was aggregated before exfiltration.
-
-</details>
-
----
-
-<details>
-<summary id="-flag-12">🚩 <strong>Flag 12: Performance Review Access Validation</strong></summary>
-
-### 🎯 Objective
-Confirm access to employee performance review material through user-level tooling.
-
-### 📌 Finding
-Process execution of notepad.exe detected opening the file "Review_JavierR.lnk" located in the HR\PerformanceReviews directory. The access was initiated by PowerShell under the compromised account, indicating the attacker was actively exploring employee performance review materials stored in a dedicated HR directory structure.
-
-### 🔍 Evidence
-| Field | Value |
-|------|-------|
-| Host | sys1-dept |
-| Timestamp (UTC) | 12/3/2025, 7:25:15.628 AM |
-| DeviceName | sys1-dept |
-| AccountName | 5y51-d3p7 |
-| ProcessCommandLine | "notepad.exe" C:\Users\5y51-D3p7\HR\PerformanceReviews\Review_JavierR.lnk |
-| InitiatingProcessCommandLine | "powershell.exe" |
-
-### 💡 Why it matters
-This activity represents **MITRE ATT&CK T1083 (File and Directory Discovery)** and **T1005 (Data from Local System)**. The use of notepad.exe to open the file indicates manual, interactive exploration of the performance review directory rather than automated data collection. The file path reveals the attacker discovered a structured HR directory at `C:\Users\5y51-D3p7\HR\PerformanceReviews\`, suggesting systematic organization of sensitive personnel data on the compromised endpoint. This access occurred approximately 40 minutes after the employee review shortcut was first accessed from the remote session (YE-HELPDESKTECH), indicating the attacker returned to investigate the actual contents after initial discovery. The PowerShell initiation suggests this may have been part of a scripted enumeration routine that opened files for review.
-
-### 🔧 KQL Query Used
-```kql
-let startTime = todatetime('2025-12-01T03:13:33.7087736Z');
-let endTime = todatetime('2025-12-04T06:27:10.6828355Z');
-let badUser = "5y51-d3p7";
-let firstCompromisedDevice = "sys1-dept";
 DeviceProcessEvents
-| where TimeGenerated between (startTime .. endTime)
-| where DeviceName == firstCompromisedDevice
-| where AccountName == badUser
-| where ProcessCommandLine contains "review"
-| project TimeGenerated, DeviceName, ProcessCommandLine, InitiatingProcessCommandLine
+| where DeviceName == "azuki-sl"
+| where Timestamp between (startofday(datetime(2025-11-19)) .. endofday(datetime(2025-11-21)))
+| where ProcessCommandLine contains "schtasks"
+| project Timestamp, DeviceName, InitiatingProcessFileName, ProcessCommandLine, InitiatingProcessCommandLine, FolderPath, AccountName, IsProcessRemoteSession
+```
+<img width="545" height="425" alt="image" src="https://github.com/user-attachments/assets/6d53958a-2f9e-4841-bb1d-8ee5676b99c7" />
+
+
+
+### 🗝️ Flag 9 – PERSISTENCE - Scheduled Task Target
+
+**Objective:**
+The scheduled task action defines what executes at runtime. This reveals the exact persistence mechanism and the malware location.
+
+**What to Hunt:**
+Extract the task action from the scheduled task creation command line. Look for the /tr parameter value in the schtasks command.
+
+**Identified Executable Path within Scheduled Task:**
+C:\ProgramData\WindowsCache\svchost.exe
+Nov 20, 2025 2:07:46 AM
+
+**Why It Matters:**
+This reveals the exact malicious executable (svchost.exe in a non-standard path) the task launches. Knowing the payload location enables precise cleanup and hunting for similar anomalous binaries across the environment (MITRE ATT&CK T1053.005 – Scheduled Task).
+
+**KQL Query Used:**
+```
+DeviceProcessEvents
+| where DeviceName == "azuki-sl"
+| where Timestamp between (startofday(datetime(2025-11-19)) .. endofday(datetime(2025-11-21)))
+| where ProcessCommandLine contains "schtasks"
+| project Timestamp, DeviceName, InitiatingProcessFileName, ProcessCommandLine, InitiatingProcessCommandLine, FolderPath, AccountName, IsProcessRemoteSession
 ```
 
-### 🖼️ Screenshot
-<img src="uploads/1769939764404_image.png">
-
-### 🛠️ Detection Recommendation
-**Hunting Tip:**
-Monitor for notepad.exe, wordpad.exe, or other text/document viewers opening files from sensitive directories (HR, Finance, Executive, Legal). Hunt for process command lines containing paths to performance review, compensation, or personnel directories. Correlate notepad.exe executions initiated by scripting engines (PowerShell, cmd.exe) as indicators of automated reconnaissance. Query DeviceFileEvents for all files within the HR\PerformanceReviews directory to identify the full scope of accessible employee data. Look for patterns where files are opened via notepad shortly after being discovered through file browsing or search operations.
-
-</details>
-
----
+<img width="839" height="69" alt="image" src="https://github.com/user-attachments/assets/b8e1a986-c3c3-4d61-b6e4-f59b5ab802b3" />
 
 
-<details>
-<summary id="-flag-13">🚩 <strong>Flag 13: Approved/Final Bonus Artifact Access</strong></summary>
 
-### 🎯 Objective
-Confirm access to a finalized year-end bonus artifact with sensitive-read classification.
+### ⏰ Flag 10 – COMMAND & CONTROL - C2 Server Address
 
-### 📌 Finding
-SensitiveFileRead event detected for the approved Q4 bonus matrix file "BonusMatrix_Q4_Approved.xlsx" located in the HR\Bonus2025 directory. The file was accessed by PowerShell under the compromised account, representing unauthorized access to finalized executive compensation data.
+**Objective:**
+Command and control infrastructure allows attackers to remotely control compromised systems. Identifying C2 servers enables network blocking and infrastructure tracking.
 
-### 🔍 Evidence
-| Field | Value |
-|------|-------|
-| Host | sys1-dept |
-| Timestamp (UTC) | 12/3/2025, 7:25:39.165 AM |
-| ActionType | SensitiveFileRead |
-| FileName | BonusMatrix_Q4_Approved.xlsx |
-| FolderPath | C:\Users\5y51-D3p7\HR\Bonus2025 |
-| InitiatingProcessFileName | powershell.exe |
+**What to Hunt:**
+Analyse network connections initiated by the suspicious executable shortly after it was downloaded. Use DeviceNetworkEvents to find outbound connections from the malicious process to external IP addresses.
 
-### 💡 Why it matters
-This activity represents **MITRE ATT&CK T1005 (Data from Local System)** and represents the most critical data theft event in the attack chain. Unlike the earlier "Draft_v3" file, this is the **approved, finalized** bonus matrix containing authoritative Q4 compensation decisions. The "SensitiveFileRead" ActionType indicates this file has been tagged with Microsoft Information Protection sensitivity labels, confirming organizational awareness of its confidential nature. The PowerShell initiation suggests this was part of an automated data collection script targeting specifically labeled sensitive files. This access occurred immediately after the attacker opened performance reviews via notepad, indicating systematic progression through increasingly sensitive HR data. The approved bonus matrix represents the ultimate target for corporate espionage, insider threats, or ransomware operators seeking maximum leverage.
+**Identified Server IP:**
+78.141.196.6
+Nov 20, 2025 1:37:26 AM
 
-### 🔧 KQL Query Used
-```kql
-let startTime = todatetime('2025-11-01');
-let endTime = todatetime('2025-12-10');
-DeviceEvents
-| where DeviceName == "sys1-dept"
-| where TimeGenerated between (startTime .. endTime)
-| where ActionType == "SensitiveFileRead"
-| project TimeGenerated, FileName, FolderPath, InitiatingProcessFileName, AdditionalFields
+**Why It Matters:**
+The outbound connection to 78.141.196.6 on port 443 is the malware checking in with the attacker’s server. Blocking this IP/domain disrupts command flow and prevents further instructions or data theft, making it a high-priority indicator for network-level containment (MITRE ATT&CK T1071 – Application Layer Protocol).
+
+**KQL Query Used:**
 ```
-
-### 🖼️ Screenshot
-<img width="932" height="149" alt="image" src="https://github.com/user-attachments/assets/6dc10497-f2e1-4cfd-9842-b68f02d35985" />
-
-
-### 🛠️ Detection Recommendation
-**Hunting Tip:**
-Monitor all SensitiveFileRead events across the environment, prioritizing files with "approved", "final", or "confidential" in their names. Hunt for PowerShell or scripting engines accessing files with Microsoft Information Protection labels. Correlate SensitiveFileRead events with subsequent network connections or archive file creation to identify potential exfiltration. Query for accounts accessing multiple sensitive files within short time windows to detect bulk data collection. Implement alerts for SensitiveFileRead actions occurring outside business hours or from service accounts. Review data loss prevention (DLP) policies to ensure sensitive files trigger appropriate controls when accessed, copied, or transferred.
-
-</details>
-
----
-
-<details>
-<summary id="-flag-14">🚩 <strong>Flag 14: Candidate Archive Creation Location</strong></summary>
-
-### 🎯 Objective
-Identify where a suspicious candidate-related archive was created.
-
-### 📌 Finding
-FileCreated event detected for "Q4Candidate_Pack.zip" in the Documents directory on sys1-dept. The archive was created at the file path C:\Users\5y51-D3p7\Documents\Q4Candidate_Pack.zip, representing staged candidate recruitment data prepared for exfiltration.
-
-### 🔍 Evidence
-| Field | Value |
-|------|-------|
-| Host | sys1-dept |
-| Timestamp (UTC) | 12/3/2025, 7:26:03.976 AM |
-| ActionType | FileCreated |
-| FileName | Q4Candidate_Pack.zip |
-| FolderPath | C:\Users\5y51-D3p7\Documents\Q4Candidate_Pack.zip |
-
-### 💡 Why it matters
-This activity represents **MITRE ATT&CK T1560.001 (Archive Collected Data: Archive via Utility)** and **T1074.001 (Data Staged: Local Data Staging)**. The Documents directory location is significant because it differs from the earlier export_stage.zip which was created in the user profile root. This separation suggests the attacker is organizing different data categories into distinct staging locations, potentially to facilitate selective exfiltration or to evade detection rules that monitor only common staging directories like Temp or Downloads. The Q4 timeframe in the filename indicates this archive targets fourth-quarter candidate hiring data, which would contain sensitive information about potential employees, compensation offers, and competitive hiring intelligence. This staging occurred immediately after the attacker accessed the approved bonus matrix file, demonstrating rapid progression from data discovery to collection and packaging.
-
-### 🔧 KQL Query Used
-```kql
-let startTime = todatetime('2025-11-01');
-let endTime = todatetime('2025-12-10');
-let firstCompromisedDevice = "sys1-dept";
-DeviceFileEvents
-| where DeviceName == firstCompromisedDevice
-| where TimeGenerated between (startTime .. endTime)
-| where FileName has_any (".zip")
-| where FileName has "candidate"
-| project TimeGenerated, FileName, ActionType, FolderPath
-```
-
-### 🖼️ Screenshot
-<img width="924" height="133" alt="image" src="https://github.com/user-attachments/assets/e6f67935-ddb1-4035-8368-d3417b48775b" />
-
-
-### 🛠️ Detection Recommendation
-**Hunting Tip:**
-Monitor for zip file creation in user profile directories, especially Documents, Desktop, and Downloads folders. Hunt for archive files with business-related naming patterns (candidate, hiring, Q1-Q4, finance, payroll) as these indicate targeted data collection rather than benign user activity. Query for multiple archive files created within close proximity to identify systematic data staging operations. Correlate archive creation with SensitiveFileRead events to determine what sensitive data was packaged. Look for archives created in locations that differ from typical malware staging paths to detect evasion techniques.
-
-</details>
-
----
-
-
-<details>
-<summary id="-flag-15">🚩 <strong>Flag 15: Outbound Transfer Attempt Timestamp</strong></summary>
-
-### 🎯 Objective
-Confirm an outbound transfer attempt occurred after staging activity.
-
-### 📌 Finding
-PowerShell-initiated network connection detected to httpbin.org (18.214.194.42) occurring 25 seconds after the Q4Candidate_Pack.zip archive was created. The connection to httpbin.org, a service commonly used for testing HTTP requests including POST operations, confirms the attacker validated data transfer capabilities before exfiltration.
-
-### 🔍 Evidence
-| Field | Value |
-|------|-------|
-| Host | sys1-dept |
-| Timestamp (UTC) | 12/3/2025, 7:26:28.595 AM |
-| InitiatingProcessFileName | powershell.exe |
-| InitiatingProcessCommandLine | "powershell.exe" |
-| RemoteIP | 18.214.194.42 |
-| RemoteUrl | httpbin.org |
-
-### 💡 Why it matters
-This activity represents **MITRE ATT&CK T1048 (Exfiltration Over Alternative Protocol)** pre-flight testing. The connection to httpbin.org is significant because it is a legitimate HTTP request testing service that provides endpoints for testing POST, PUT, and file upload operations. Attackers commonly use httpbin.org to validate their exfiltration scripts can successfully transmit data before sending it to their actual command and control infrastructure. The 25-second gap between archive creation and this connectivity test demonstrates methodical operational security where the attacker validates the transfer mechanism immediately after packaging sensitive data. This follows the same pattern observed earlier with the example.com connectivity test, confirming the attacker's systematic approach to validating network egress before committing to data exfiltration.
-
-### 🔧 KQL Query Used
-```kql
-let startTime = todatetime('2025-12-03T07:26:03.9765516Z');
-let endTime = todatetime('2025-12-04T06:27:10.6828355Z');
-let badUser = "5y51-d3p7";
-let firstCompromisedDevice = "sys1-dept";
 DeviceNetworkEvents
-| where DeviceName == firstCompromisedDevice
-| where InitiatingProcessAccountName == badUser
-| where TimeGenerated between (startTime .. endTime)
-| where RemoteIPType == "Public"
-| project TimeGenerated, InitiatingProcessFileName, InitiatingProcessCommandLine, RemoteIP, RemoteUrl
-| order by TimeGenerated asc
+| where Timestamp between (startofday(datetime(2025-11-19)) .. endofday(datetime(2025-11-21)))
+| where DeviceName == "azuki-sl"
+
 ```
 
-### 🖼️ Screenshot
-<img width="882" height="254" alt="image" src="https://github.com/user-attachments/assets/cbe16653-7881-4ae1-9e30-a1d60894cb39" />
+<img width="1703" height="101" alt="image" src="https://github.com/user-attachments/assets/5cd5847a-c4fb-4805-978c-697945ae0897" />
 
 
-### 🛠️ Detection Recommendation
-**Hunting Tip:**
-Monitor for connections to testing and debugging services (httpbin.org, webhook.site, requestbin.com, postb.in) from production systems, especially when initiated by PowerShell or scripting engines. Hunt for network connections occurring within 1-5 minutes after archive file creation to identify exfiltration preparation activity. Query for HTTP POST requests to external endpoints following data staging events. Correlate connections to benign testing services with subsequent connections to unfamiliar or suspicious domains to identify the actual exfiltration destination. Implement network egress controls to block or alert on connections to known testing services from endpoints that should not require external debugging capabilities.
+### 🧭 Flag 11 – COMMAND & CONTROL - C2 Communication Port
 
-</details>
+**Objective:**
+C2 communication ports can indicate the framework or protocol used. This information supports network detection rules and threat intelligence correlation.
 
----
+**What to Hunt:**
+Examine the destination port for outbound connections from the malicious executable. Check DeviceNetworkEvents for the RemotePort field associated with C2 traffic.
 
-<details>
-<summary id="-flag-16">🚩 <strong>Flag 16: Local Log Clearing Attempt Evidence</strong></summary>
+**Identified Destination Port:**
+443
 
-### 🎯 Objective
-Identify command-line evidence of attempted local log clearing.
+**Why It Matters:**
+Traffic over port 443 blends malicious C2 with normal HTTPS, bypassing port-based blocks. Recognizing this pattern pushes defenses toward TLS inspection and behavioral anomaly detection rather than relying solely on firewalls (MITRE ATT&CK T1571 – Non-Standard Port / HTTPS blending).
 
-### 📌 Finding
-Execution of wevtutil.exe detected with command-line parameters targeting the PowerShell Operational event log for clearing. The command was initiated by PowerShell under the compromised account, representing an attempt to erase evidence of PowerShell-based malicious activity from Windows event logs.
-
-### 🔍 Evidence
-| Field | Value |
-|------|-------|
-| Host | sys1-dept |
-| Timestamp (UTC) | 12/3/2025, 8:18:58.783 AM |
-| ProcessCommandLine | "wevtutil.exe" cl Microsoft-Windows-PowerShell/Operational |
-| AccountName | 5y51-d3p7 |
-| InitiatingProcessCommandLine | "powershell.exe" |
-
-### 💡 Why it matters
-This activity represents **MITRE ATT&CK T1070.001 (Indicator Removal: Clear Windows Event Logs)**. The wevtutil utility with the "cl" (clear log) parameter is the standard Windows method for erasing event logs. Targeting the PowerShell Operational log specifically demonstrates the attacker's awareness that their PowerShell-based activities (script execution, file staging, network connections) would generate telemetry in this log. This log clearing occurred approximately 52 minutes after the outbound transfer test to httpbin.org, suggesting the attacker attempted to cover their tracks after validating exfiltration capabilities. The PowerShell initiation indicates this was part of an automated cleanup script rather than manual command execution. Clearing logs is a strong indicator of malicious intent, as legitimate administrative activities rarely require wholesale log deletion.
-
-### 🔧 KQL Query Used
-```kql
-let startTime = todatetime('2025-11-01');
-let endTime = todatetime('2025-12-10');
-let firstCompromisedDevice = "sys1-dept";
-DeviceProcessEvents
-| where DeviceName == firstCompromisedDevice
-| where TimeGenerated between (startTime .. endTime)
-| where ProcessCommandLine has_any ("wevtutil", "Clear-EventLog", "clear-log", "cl Security", "cl Application", "cl System")
-| project TimeGenerated, ProcessCommandLine, AccountName, InitiatingProcessCommandLine
+**KQL Query Used:**
 ```
-
-### 🖼️ Screenshot
-<img width="924" height="145" alt="image" src="https://github.com/user-attachments/assets/ca1fb295-8d4c-4fbf-8289-4d9f2b505a1a" />
-
-
-### 🛠️ Detection Recommendation
-**Hunting Tip:**
-Monitor for all wevtutil.exe executions with "cl" or "clear-log" parameters, treating these as high-severity indicators of anti-forensic activity. Hunt for Clear-EventLog PowerShell cmdlet usage across the environment. Look for log clearing attempts targeting Security, System, or PowerShell Operational logs as these contain the most valuable forensic evidence. Correlate log clearing with other suspicious activity from the same account within the preceding hours to identify what the attacker is attempting to hide. Implement Sysmon or centralized log forwarding to ensure event data is preserved externally even if local logs are cleared. Alert on any log clearing outside of approved maintenance windows or by non-administrative accounts.
-
-</details>
-
----
-
-<details>
-<summary id="-flag-17">🚩 <strong>Flag 17: Second Endpoint Scope Confirmation</strong></summary>
-
-### 🎯 Objective
-Identify the second endpoint involved in the chain based on similar telemetry patterns.
-
-### 📌 Finding
-Network telemetry identified a second compromised endpoint named "main1-srvr" exhibiting remote session activity. The server shows an active remote session connection to external IP 150.171.28.11, indicating lateral movement from the initial sys1-dept workstation compromise to critical server infrastructure.
-
-### 🔍 Evidence
-| Field | Value |
-|------|-------|
-| DeviceName | main1-srvr |
-| Timestamp (UTC) | 12/3/2025, 10:57:09.238 AM |
-| InitiatingProcessAccountName | main1-srvr |
-| IsInitiatingProcessRemoteSession | true |
-| LocalIP | 10.0.0.12 |
-| RemoteIPType | Public |
-| RemoteIP | 150.171.28.11 |
-
-### 💡 Why it matters
-This activity represents **MITRE ATT&CK T1021 (Remote Services)** and **T1570 (Lateral Tool Transfer)**. The compromise of main1-srvr represents a critical escalation from endpoint to server infrastructure. Servers typically have elevated privileges, access to centralized data repositories, and network visibility across the enterprise. The device naming "main1-srvr" suggests this is a primary server, potentially hosting critical business services, databases, or file shares. The external remote session IP (150.171.28.11) differs from the previous external IP (4.150.155.223), indicating the attacker may be using multiple command and control infrastructure points or has established a multi-hop proxy chain. The shared LocalIP (10.0.0.12) with sys1-dept suggests these systems are on the same network segment, facilitating lateral movement.
-
-### 🔧 KQL Query Used
-```kql
-let startTime = todatetime('2025-12-01T03:13:33.7087736Z');
-let endTime = todatetime('2025-12-04T08:29:21.12468Z');
 DeviceNetworkEvents
-| where TimeGenerated between (startTime .. endTime)
-| where InitiatingProcessRemoteSessionIP == "192.168.0.110"
-| project TimeGenerated, DeviceName, InitiatingProcessAccountName, IsInitiatingProcessRemoteSession, LocalIP, RemoteIPType, RemoteIP
+| where Timestamp between (startofday(datetime(2025-11-19)) .. endofday(datetime(2025-11-21)))
+| where DeviceName == "azuki-sl"
 ```
-
-### 🖼️ Screenshot
-<img width="902" height="224" alt="image" src="https://github.com/user-attachments/assets/146bea65-dbc8-476f-9d18-51f960e833cc" />
+<img width="1672" height="391" alt="image" src="https://github.com/user-attachments/assets/b0ef8b80-d0df-406c-ab5b-0bc61d8560a8" />
 
 
-### 🛠️ Detection Recommendation
-**Hunting Tip:**
-Pivot on main1-srvr to identify all malicious activity on this second compromised system. Query DeviceProcessEvents, DeviceFileEvents, and DeviceRegistryEvents for main1-srvr using the same hunting techniques applied to sys1-dept. Investigate how lateral movement occurred from sys1-dept to main1-srvr by searching for authentication events, SMB connections, or remote execution attempts between these systems. Hunt for the external IP 150.171.28.11 across all network telemetry to identify other potentially compromised systems communicating with this infrastructure. Assess the criticality of main1-srvr and prioritize containment and forensic analysis given its likely elevated role in the environment.
 
-</details>
+### ⏱️ Flag 12 – CREDENTIAL ACCESS - Credential Theft Tool
 
----
+**Objective:**
+Credential dumping tools extract authentication secrets from system memory. These tools are typically renamed to avoid signature-based detection.
 
-<details>
-<summary id="-flag-18">🚩 <strong>Flag 18: Approved Bonus Artifact Access on Second Endpoint</strong></summary>
+**What to Hunt:**
+Look for executables downloaded to the staging directory with very short filenames. Search for files created shortly before LSASS memory access events.
 
-### 🎯 Objective
-Confirm the approved bonus artifact is accessed again on the second endpoint.
+**Identified Executable:**
+mm.exe
+Nov 20, 2025 2:07:22 AM
 
-### 📌 Finding
-SensitiveFileRead event detected on main1-srvr for "YearEnd_ReviewPackage_2025.zip" located in the internal archive directory. The file was accessed by a PowerShell process that was created at 3:11:58.602 AM UTC, demonstrating continued targeting of year-end compensation and review materials on the compromised server infrastructure.
+**Why It Matters:**
+Downloading a renamed Mimikatz (mm.exe) signals intent to dump credentials from memory. Catching the transfer early limits the window for password theft and prompts proactive credential rotation (MITRE ATT&CK T1003 – OS Credential Dumping).
 
-### 🔍 Evidence
-| Field | Value |
-|------|-------|
-| Host | main1-srvr |
-| Timestamp (UTC) | 12/4/2025, 3:15:48.361 AM |
-| ActionType | SensitiveFileRead |
-| FileName | YearEnd_ReviewPackage_2025.zip |
-| FolderPath | C:\Users\Main1-Srvr\Documents\InternalReferences\ArchiveBundles |
-| InitiatingProcessFileName | powershell.exe |
-| InitiatingProcessCreationTime (UTC) | 12/4/2025, 3:11:58.602 AM |
-
-### 💡 Why it matters
-This activity represents **MITRE ATT&CK T1005 (Data from Local System)** on the second compromised endpoint. The access to year-end review package materials on main1-srvr demonstrates the attacker's systematic targeting of sensitive HR and compensation data across multiple systems. The file location in "InternalReferences\ArchiveBundles" suggests this server hosts centralized archive storage, making it a high-value target containing historical sensitive data beyond what was available on the workstation. The PowerShell process creation timestamp (3:11:58 AM) occurring approximately 4 minutes before the file read indicates the attacker launched a data discovery or collection script that subsequently identified and accessed this sensitive archive. This represents the third distinct year-end/bonus-related artifact accessed across the attack chain, confirming compensation data as the primary intelligence objective.
-
-### 🔧 KQL Query Used
-```kql
-let startTime = todatetime('2025-11-01');
-let endTime = todatetime('2025-12-10');
-DeviceEvents
-| where DeviceName == "main1-srvr"
-| where TimeGenerated between (startTime .. endTime)
-| where ActionType == "SensitiveFileRead"
-| project TimeGenerated, ActionType, InitiatingProcessCreationTime, FileName, FolderPath, InitiatingProcessFileName, AdditionalFields
+**KQL Query Used:**
 ```
-
-### 🖼️ Screenshot
-<img width="936" height="191" alt="image" src="https://github.com/user-attachments/assets/2e08662a-39e0-4bfe-9a4e-006706aab023" />
-
-
-### 🛠️ Detection Recommendation
-**Hunting Tip:**
-Hunt for SensitiveFileRead events across both compromised systems to identify the full scope of sensitive data access. Correlate InitiatingProcessCreationTime with DeviceProcessEvents to identify what spawned the PowerShell process and what command-line parameters were used. Query for files in "Archive" or "Reference" directories as these often contain historical sensitive data that may not be actively monitored. Look for patterns where the same attacker targets similar file types (bonus, review, compensation) across multiple systems, indicating focused intelligence gathering. Investigate whether YearEnd_ReviewPackage_2025.zip was subsequently staged or exfiltrated by querying for file copy, network transfer, or additional archive creation events following this access.
-
-</details>
-
----
-
-<details>
-<summary id="-flag-19">🚩 <strong>Flag 19: Employee Scorecard Access on Second Endpoint</strong></summary>
-
-### 🎯 Objective
-Confirm employee-related scorecard access occurs again on the second endpoint and identify the remote session device context.
-
-### 📌 Finding
-Notepad execution detected on main1-srvr opening the file "Scorecard_JavierR.txt" from the DepartmentReviews directory. The access originated from a remote session associated with device "YE-FINANCEREVIE", representing a fourth compromised system in the attack chain and indicating the attacker's continued focus on employee performance and compensation data.
-
-### 🔍 Evidence
-| Field | Value |
-|------|-------|
-| Host | main1-srvr |
-| Timestamp (UTC) | 12/4/2025, 3:14:03.712 AM |
-| ProcessCommandLine | "notepad.exe" C:\Users\Main1-Srvr\Documents\DepartmentReviews\Scorecard_JavierR.txt |
-| AccountName | main1-srvr |
-| InitiatingProcessCommandLine | "powershell.exe" |
-| ProcessRemoteSessionDeviceName | YE-FINANCEREVIE |
-
-### 💡 Why it matters
-This activity represents **MITRE ATT&CK T1021 (Remote Services)** and **T1083 (File and Directory Discovery)** from a fourth compromised endpoint. The device name "YE-FINANCEREVIE" indicates this is a Finance department workstation used for employee reviews, suggesting the attacker has systematically compromised systems across multiple departments (IT Helpdesk, HR Planning, Finance Review). The targeting of the same employee's scorecard (JavierR) that was previously accessed on sys1-dept demonstrates persistent intelligence gathering on specific individuals, potentially indicating this employee holds a sensitive role or has access the attacker wants to compromise. The use of notepad for file viewing initiated by PowerShell suggests automated or scripted browsing behavior. The structured directory path "DepartmentReviews" on the server indicates main1-srvr serves as a centralized repository for cross-departmental personnel data.
-
-### 🔧 KQL Query Used
-```kql
-let startTime = todatetime('2025-11-01');
-let endTime = todatetime('2025-12-10');
-let firstCompromisedDevice = "main1-srvr";
-DeviceProcessEvents
-| where DeviceName == firstCompromisedDevice
-| where TimeGenerated between (startTime .. endTime)
-| where FileName =~ "notepad.exe"
-| where ProcessCommandLine has "scorecard"
-| project TimeGenerated, ProcessCommandLine, AccountName, InitiatingProcessCommandLine, ProcessRemoteSessionDeviceName
-| order by TimeGenerated asc
-```
-
-### 🖼️ Screenshot
-<img width="920" height="167" alt="image" src="https://github.com/user-attachments/assets/ba9320ad-bcca-4cba-bc3b-3bd958a136a5" />
-
-
-### 🛠️ Detection Recommendation
-**Hunting Tip:**
-Pivot on YE-FINANCEREVIE to identify all systems it has accessed and all accounts used from this device. Query authentication logs for lateral movement from YE-FINANCEREVIE to map the full attack path. Hunt for access to employee scorecards, performance reviews, or personnel files from Finance department systems as these should typically be restricted to HR. Correlate the targeting of specific individuals (like JavierR) across multiple systems to identify if the attacker is building dossiers on high-value targets. Investigate whether the Finance Review workstation has elevated access to compensation, budget, or financial planning data that could be the attacker's ultimate objective. Review network segmentation to determine why Finance workstations have access to HR server infrastructure.
-
-</details>
-
----
-
-<details>
-<summary id="-flag-20">🚩 <strong>Flag 20: Staging Directory Identification on Second Endpoint</strong></summary>
-
-### 🎯 Objective
-Identify the directory used for consolidation of internal reference materials and archived content.
-
-### 📌 Finding
-FileCreated event detected on main1-srvr for "YearEnd_ReviewPackage_2025.zip" in the InternalReferences\ArchiveBundles directory structure. This location represents the attacker's staging area on the compromised server for consolidating sensitive year-end review and compensation materials before exfiltration.
-
-### 🔍 Evidence
-| Field | Value |
-|------|-------|
-| Host | main1-srvr |
-| Timestamp (UTC) | 12/4/2025, 3:15:29.259 AM |
-| ActionType | FileCreated |
-| FolderPath | C:\Users\Main1-Srvr\Documents\InternalReferences\ArchiveBundles\YearEnd_ReviewPackage_2025.zip |
-| FileName | YearEnd_ReviewPackage_2025.zip |
-| InitiatingProcessAccountName | main1-srvr |
-
-### 💡 Why it matters
-This activity represents **MITRE ATT&CK T1074.001 (Data Staged: Local Data Staging)** on the compromised server infrastructure. The directory path "InternalReferences\ArchiveBundles" indicates the attacker leveraged existing organizational structure for storing reference materials to blend their staging activity with legitimate file operations. Creating the archive in an established "ArchiveBundles" directory provides operational camouflage, as security monitoring may overlook zip file creation in locations designated for archival purposes. This staging occurred approximately 90 seconds before the same file was accessed via SensitiveFileRead (Flag 18), indicating a create-then-read workflow. The consolidation of year-end review materials into a single archive demonstrates the attacker's preparation for bulk exfiltration of sensitive HR and compensation data collected across multiple compromised systems.
-
-### 🔧 KQL Query Used
-```kql
-let startTime = todatetime('2025-12-01');
-let endTime = todatetime('2025-12-05');
 DeviceFileEvents
-| where DeviceName == "main1-srvr"
-| where TimeGenerated between (startTime .. endTime)
-| where FileName endswith ".zip"
-| where InitiatingProcessAccountName !in~ ("system", "local service", "network service")
-| where InitiatingProcessAccountName !startswith "NT AUTHORITY"
-| project TimeGenerated, ActionType, FolderPath, FileName, InitiatingProcessAccountName
-| order by TimeGenerated asc
+| where Timestamp between (startofday(datetime(2025-11-19)) .. endofday(datetime(2025-11-21)))
+| where DeviceName == "azuki-sl"
+| where FolderPath contains "cache"
+```
+<img width="1692" height="425" alt="image" src="https://github.com/user-attachments/assets/8a4cf6e5-233d-4a59-858a-76f01b04313c" />
+
+
+
+### 📂 Flag 13 – CREDENTIAL ACCESS - Memory Extraction Module
+
+**Objective:**
+Reveal which specific document the attacker targeted on the second host.
+
+**What to Hunt:**
+Examine the command line arguments passed to the credential dumping tool. Look for module::command syntax in the process command line or output redirection.
+
+**Identified Permissions:**
+
+"mm.exe" privilege::debug sekurlsa::logonpasswords exit
+
+Nov 20, 2025 2:08:26 AM
+
+**Why It Matters:**
+The specific Mimikatz arguments (sekurlsa::logonpasswords) confirm successful extraction of clear-text credentials from LSASS. This evidence drives immediate enterprise-wide password resets and evaluation of protections like Credential Guard (MITRE ATT&CK T1003.001 – LSASS Memory).
+
+**KQL Queries Used:**
+```
+DeviceProcessEvents
+| where DeviceName == "azuki-sl"
+| where Timestamp between (startofday(datetime(2025-11-19)) .. endofday(datetime(2025-11-21)))
+| where FileName contains "mm.exe"
+| project Timestamp, FileName, DeviceName, InitiatingProcessFileName, ProcessCommandLine, InitiatingProcessCommandLine, FolderPath, AccountName, IsProcessRemoteSession
+
+```
+<img width="1713" height="163" alt="image" src="https://github.com/user-attachments/assets/36b8ab65-61e3-4963-956e-604ebc04d23f" />
+
+
+
+
+### ☁️ Flag 14 – COLLECTION - Data Staging Archive
+
+**Objective:**
+Attackers compress stolen data for efficient exfiltration. The archive filename often includes dates or descriptive names for the attacker's organisation.
+
+**What to Hunt:**
+Search for ZIP file creation in the staging directory during the collection phase. Look for Compress-Archive commands or examine files created before exfiltration activity.
+
+**Compressed archives for Data Exfiltration:**
+export-data.zip
+
+**Why It Matters:**
+
+Creating zip archives (e.g., export-data.zip) organizes stolen files for efficient exfiltration. Identifying these staging files reveals exactly what data was targeted and helps assess business impact or regulatory exposure (MITRE ATT&CK T1560 – Archive Collected Data).
+
+**KQL Query Used:**
+```
+DeviceFileEvents
+| where Timestamp between (startofday(datetime(2025-11-19)) .. endofday(datetime(2025-11-21)))
+| where DeviceName == "azuki-sl"
+| where FileName contains ".zip"
 ```
 
-### 🖼️ Screenshot
-<img width="910" height="198" alt="image" src="https://github.com/user-attachments/assets/1a36156d-bcc9-4a02-9f1e-bd52abf76d94" />
+<img width="1096" height="161" alt="image" src="https://github.com/user-attachments/assets/79729a8a-c67f-4b52-89b3-68067296c30b" />
 
 
-### 🛠️ Detection Recommendation
-**Hunting Tip:**
-Monitor for zip file creation in directories with names suggesting legitimate archival purposes (Archive, Backup, Reference, Historical) as attackers exploit these locations for staging. Hunt for file creation followed by SensitiveFileRead events within short time windows to identify create-then-access patterns indicative of staging operations. Query for archives created in user profile Documents folders on servers, as servers typically don't require user-level document archiving. Correlate staging directory locations with subsequent network connections to identify exfiltration attempts. Implement file integrity monitoring on sensitive data repositories to detect unexpected archive creation activity.
+### 🌐 Flag 15 – EXFILTRATION - Exfiltration Channel
 
-</details>
+**Objective:**
+Cloud services with upload capabilities are frequently abused for data theft. Identifying the service helps with incident scope determination and potential data recovery.
 
----
+**What to Hunt:**
+Analyse outbound HTTPS connections and file upload operations during the exfiltration phase. Check DeviceNetworkEvents for connections to common file sharing or communication platforms.
 
-<details>
-<summary id="-flag-21">🚩 <strong>Flag 21: Staging Activity Timing on Second Endpoint</strong></summary>
+**Cloud Service:**
+discord
+Nov 20, 2025 2:09:21 AM
 
-### 🎯 Objective
-Determine when staging activity occurred during the final phase on the second endpoint.
+**Why It Matters:**
+Uploading data via Discord abuses a trusted consumer service to move stolen files out undetected. This highlights the growing challenge of detecting exfiltration over allowed platforms and the value of DLP controls on cloud collaboration tools (MITRE ATT&CK T1567 – Exfiltration Over Web Service).
 
-### 📌 Finding
-File staging activity on main1-srvr occurred at 3:15:29.259 AM UTC on December 4th, 2025. This timestamp marks the creation of the YearEnd_ReviewPackage_2025.zip archive in the InternalReferences\ArchiveBundles directory, representing the final data consolidation phase before exfiltration.
-
-### 🔍 Evidence
-| Field | Value |
-|------|-------|
-| Host | main1-srvr |
-| Timestamp (UTC) | 12/4/2025, 3:15:29.259 AM |
-| ActionType | FileCreated |
-| FileName | YearEnd_ReviewPackage_2025.zip |
-| FolderPath | C:\Users\Main1-Srvr\Documents\InternalReferences\ArchiveBundles |
-
-### 💡 Why it matters
-This timestamp represents a critical inflection point in the attack timeline, marking the transition from data collection to preparation for exfiltration on the server infrastructure. The timing at 3:15:29 AM occurred approximately 3 minutes after the PowerShell process was created (3:11:58 AM from Flag 18) and 90 seconds before the sensitive file read event (3:15:48 AM), revealing a compressed operational tempo during the final phase. The early morning timing (3:15 AM local time) demonstrates the attacker's operational security awareness, choosing hours with minimal security analyst coverage and reduced likelihood of real-time detection. This staging event on main1-srvr occurred approximately 20 hours after the initial staging activity on sys1-dept (7:26 AM on December 3rd), indicating the attacker conducted phased collection operations across multiple days to avoid triggering volume-based detection thresholds.
-
-### 🛠️ Detection Recommendation
-**Hunting Tip:**
-Analyze the timing patterns of staging events across both compromised systems to understand the attacker's operational rhythm and identify potential time-based detection opportunities. Hunt for archive creation during off-hours (late night/early morning) as indicators of malicious activity rather than legitimate business operations. Correlate this timestamp with network telemetry to determine if exfiltration occurred immediately after staging or if the attacker waited for additional operational windows. Query for other suspicious activities occurring within the same time window (3:00-4:00 AM) to identify potentially related attack actions. Use this timing information to prioritize threat hunting during historical gaps in security monitoring coverage.
-
-</details>
-
----
-
-<details>
-<summary id="-flag-22">🚩 <strong>Flag 22: Outbound Connection Remote IP (Final Phase)</strong></summary>
-
-### 🎯 Objective
-Identify the remote IP associated with the final outbound connection attempt.
-
-### 📌 Finding
-PowerShell-initiated network connection detected from main1-srvr to httpbin.org (54.83.21.156) on port 443 occurring 19 seconds after the YearEnd_ReviewPackage_2025.zip staging activity. This connection represents the final outbound transfer attempt, confirming the attacker validated exfiltration capabilities from the compromised server.
-
-### 🔍 Evidence
-| Field | Value |
-|------|-------|
-| Host | main1-srvr |
-| Timestamp (UTC) | 12/4/2025, 3:15:48.347 AM |
-| InitiatingProcessFileName | powershell.exe |
-| RemoteIP | 54.83.21.156 |
-| RemoteUrl | httpbin.org |
-| RemotePort | 443 |
-
-### 💡 Why it matters
-This activity represents **MITRE ATT&CK T1048 (Exfiltration Over Alternative Protocol)** and mirrors the same connectivity testing pattern observed on sys1-dept (Flag 7 and 15). The use of httpbin.org for the second time confirms this is the attacker's standard operational procedure for validating HTTP/HTTPS exfiltration capabilities before transmitting actual data. The connection to port 443 (HTTPS) indicates the attacker is preparing encrypted exfiltration to evade network inspection. The timing 19 seconds after staging demonstrates the same rapid operational tempo seen previously: stage data, immediately test connectivity, then exfiltrate. The different IP address (54.83.21.156 vs 23.215.0.136 from Flag 7) suggests httpbin.org uses multiple backend servers or the attacker is routing through different infrastructure. This represents the final observable phase before data leaves the environment.
-
-### 🔧 KQL Query Used
-```kql
-let startTime = todatetime('2025-12-04T03:15:29Z');
-let endTime = todatetime('2025-12-05');
+**KQL Query Used:**
+```
 DeviceNetworkEvents
-| where DeviceName == "main1-srvr"
-| where TimeGenerated >= startTime
-| where RemoteIPType == "Public"
-| where InitiatingProcessAccountName !in~ ("system", "local service", "network service")
-| where InitiatingProcessAccountName !startswith "NT AUTHORITY"
-| project TimeGenerated, InitiatingProcessFileName, RemoteIP, RemoteUrl, RemotePort
-| order by TimeGenerated asc
+| where Timestamp between (startofday(datetime(2025-11-19)) .. endofday(datetime(2025-11-21)))
+| where DeviceName == "azuki-sl"
 ```
 
-### 🖼️ Screenshot
-<img width="919" height="169" alt="image" src="https://github.com/user-attachments/assets/0b12d531-9df1-4e9a-815a-c1f78ac9779e" />
+<img width="624" height="580" alt="image" src="https://github.com/user-attachments/assets/f56ec8bb-3736-4c01-aa1d-553952a05961" />
 
 
-### 🛠️ Detection Recommendation
-**Hunting Tip:**
-Investigate the remote IP 54.83.21.156 across all network telemetry to identify if other systems successfully exfiltrated data to this endpoint. Hunt for connections to httpbin.org followed by connections to other external IPs within minutes, as the testing service connection may precede actual exfiltration to attacker-controlled infrastructure. Query for HTTPS (port 443) connections from servers to external IPs, as server-to-internet traffic is often anomalous and may indicate data theft. Correlate this connection with subsequent file deletion, log clearing, or other anti-forensic activities to complete the attack timeline. Implement network monitoring for data volume transferred to identify if actual exfiltration occurred or if this was only a connectivity test that was interrupted by detection or remediation.
 
-</details>
+
+### 🧬 Flag 16 – ANTI-FORENSICS - Log Tampering
+
+**Objective:**
+Clearing event logs destroys forensic evidence and impedes investigation efforts. The order of log clearing can indicate attacker priorities and sophistication.
+
+**What to Hunt:**
+Search for event log clearing commands near the end of the attack timeline. Look for wevtutil.exe executions and identify which log was cleared first.
+
+**Cleared Windows Event Log:**
+Security
+Nov 20, 2025 2:11:39 AM
+
+**Why It Matters:**
+Clearing the Security log first removes evidence of authentication and privilege use. This sophisticated cover-up tactic underscores the need to forward logs to a central protected SIEM in real time (MITRE ATT&CK T1070.001 – Clear Windows Event Logs).
+
+**KQL Query Used:**
+```
+DeviceProcessEvents
+| where DeviceName == "azuki-sl"
+| where Timestamp between (startofday(datetime(2025-11-19)) .. endofday(datetime(2025-11-21)))
+| where ProcessCommandLine contains "wev"
+| project Timestamp, FileName, DeviceName, InitiatingProcessFileName, ProcessCommandLine, InitiatingProcessCommandLine, FolderPath, AccountName, IsProcessRemoteSession
+```
+<img width="1641" height="358" alt="image" src="https://github.com/user-attachments/assets/ed10b702-1075-4e29-8990-331d3b900ba8" />
+
+<img width="1677" height="330" alt="image" src="https://github.com/user-attachments/assets/182dccd6-c8af-47c5-b89a-318df8f1c4a4" />
+
+
+
+### 🧹 Flag 17 – IMPACT - Persistence Account
+
+**Objective:**
+Hidden administrator accounts provide alternative access for future operations. These accounts are often configured to avoid appearing in normal user interfaces.
+
+**What to Hunt:**
+Search for account creation commands executed during the impact phase. Look for commands with the /add parameter followed by administrator group additions.
+
+**Hidden Username:**
+support
+
+**Why It Matters:**
+Adding a hidden local admin account (“support”) creates a long-term backdoor. Discovering these planted accounts allows immediate removal and strengthens controls around local account creation and monitoring (MITRE ATT&CK T1098 – Account Manipulation).
+
+**KQL Query Used:**
+```
+DeviceProcessEvents
+| where DeviceName == "azuki-sl"
+| where Timestamp between (startofday(datetime(2025-11-19)) .. endofday(datetime(2025-11-21)))
+| where ProcessCommandLine contains "add"
+| project Timestamp, FileName, DeviceName, InitiatingProcessFileName, ProcessCommandLine, InitiatingProcessCommandLine, FolderPath, AccountName, IsProcessRemoteSession
+```
+<img width="1678" height="135" alt="image" src="https://github.com/user-attachments/assets/656c2f22-51e3-44be-90d7-dee068d70c56" />
+
+
+
 
 ---
 
-## 🚨 Detection Gaps & Recommendations
+### 🧹 Flag 18 – EXECUTION - Malicious Script
 
-### Observed Gaps
+**Objective:**
+Attackers often use scripting languages to automate their attack chain. Identifying the initial attack script reveals the entry point and automation method used in the compromise.
 
-* **Insufficient Remote Session Monitoring:** Remote sessions from internal IP 192.168.0.110 to multiple systems (sys1-dept, main1-srvr) went undetected despite serving as the primary pivot point for lateral movement. No alerting existed for unusual remote session patterns or cross-departmental access from IT/Finance systems to HR data repositories.
+**What to Hunt:**
+Search DeviceFileEvents for script files created in temporary directories during the initial compromise phase. Look for PowerShell or batch script files downloaded from external sources shortly after initial access.
 
-* **Lack of Sensitive File Access Correlation:** Multiple SensitiveFileRead events for bonus matrices and employee reviews across different systems were not correlated into a unified detection. The organization lacked behavioral analytics to identify the same employee data (JavierR) being accessed repeatedly across unrelated systems within short timeframes.
+**Found PowerShell Script to Start Attack Chain:**
+Nov 20, 2025 1:37:40 AM
+wupdate.ps1
 
-* **Social Engineering Filename Evasion:** Files and scheduled tasks using HR-related naming conventions (PayrollSupportTool.ps1, BonusReviewAssist, BonusMatrix_Draft_v3.xlsx) successfully evaded detection. No content inspection or behavioral analysis existed to validate whether "payroll" or "bonus" themed scripts were legitimate administrative tools.
+**Why It Matters:**
+The PowerShell script wupdate.ps1 automated most of the attack chain from the start. Analyzing it reveals the attacker’s full playbook and tooling, aiding threat intelligence and future detection signatures (MITRE ATT&CK T1059.001 – PowerShell).
 
-* **Off-Hours Activity Baseline Gaps:** Critical operations occurring between 3:00-7:00 AM local time (file staging, log clearing, server access) did not trigger anomaly detection. The organization lacked time-of-day baselines for administrative accounts and service accounts accessing sensitive data.
-
-* **Log Clearing Detection Failure:** The use of `wevtutil.exe` to clear PowerShell operational logs (T1070.001) was not detected in real-time, allowing the attacker to eliminate forensic evidence. No compensating controls existed such as centralized log forwarding or immutable log storage.
-
-* **Connectivity Testing Service Blind Spot:** Repeated connections to httpbin.org and example.com for exfiltration pre-flight testing were not flagged as suspicious. Network monitoring lacked signatures for common testing/debugging services frequently abused by attackers.
-
-* **Dual Persistence Mechanism Oversight:** The establishment of both registry Run keys and scheduled tasks within 20 minutes was not correlated as a persistence layering technique. Each mechanism was potentially logged but not analyzed as part of a coordinated attack pattern.
-
-* **Cross-Department Lateral Movement Visibility:** Movement from IT Helpdesk (YE-HELPDESKTECH) to HR data, and Finance workstations (YE-FINANCEREVIE) accessing HR servers, violated implicit trust boundaries but generated no alerts. Network segmentation and lateral movement detection were insufficient.
-
----
-
-### Recommendations
-
-#### **Immediate (0-30 days)**
-
-* **Deploy Centralized Log Forwarding:** Implement immediate forwarding of Security, System, and PowerShell logs to SIEM or centralized logging platform with immutable storage. Prioritize PowerShell operational logs (Event ID 4104) to prevent log clearing from eliminating evidence.
-
-* **Create High-Fidelity Detections:**
-  - Alert on `wevtutil.exe` execution with "cl" or "clear-log" parameters (T1070.001)
-  - Alert on SensitiveFileRead events for files containing "bonus", "salary", "compensation" outside business hours
-  - Alert on remote sessions from IT/Finance systems accessing HR file shares or servers
-  - Alert on connections to httpbin.org, example.com, webhook.site from production systems
-
-* **Implement Emergency Credential Rotation:** Force password resets for account 5y51-d3p7 and all accounts that authenticated from 192.168.0.110. Conduct forensic review of accounts with access to compromised systems to identify potential credential harvesting.
-
-* **Enable Enhanced PowerShell Logging:** Deploy PowerShell script block logging and module logging across all endpoints. Configure alerts for execution policy bypass (`-ExecutionPolicy Bypass`) combined with scripts from user-writable directories.
-
-#### **Short-Term (30-90 days)**
-
-* **Deploy Behavioral Analytics for Sensitive Data:** Implement user and entity behavior analytics (UEBA) to baseline normal access patterns for HR data repositories. Alert on deviations including: off-hours access, cross-departmental access, rapid sequential file access, same-file access from multiple systems.
-
-* **Implement File Access Correlation:** Create detection logic that correlates SensitiveFileRead events across systems within configurable time windows (e.g., same filename accessed on 3+ systems within 24 hours). Prioritize files containing PII, compensation, or executive content.
-
-* **Network Segmentation Enforcement:** Implement microsegmentation or firewall rules preventing IT Helpdesk and Finance workstations from directly accessing HR file servers. Require privileged access workstations (PAWs) or jump boxes for cross-departmental administrative tasks.
-
-* **Deploy EDR Behavioral Detections:** Configure endpoint detection and response (EDR) platform to alert on:
-  - Multiple persistence mechanisms created within short time windows
-  - Archive file creation followed by network connections to public IPs
-  - Notepad/Explorer execution of files from network shares or unusual directories
-  - Registry Run key modifications outside approved change windows
-
-#### **Long-Term (90+ days)**
-
-* **Implement Data Loss Prevention (DLP):** Deploy DLP controls on endpoints and network egress points to detect and block exfiltration of files containing sensitive keywords (bonus, salary, SSN patterns, employee IDs). Prioritize monitoring of archive file transfers and uploads to cloud storage services.
-
-* **Establish Privileged Access Management (PAM):** Implement just-in-time privileged access for administrative accounts. Require MFA and session recording for any account accessing HR, Finance, or Executive data repositories. Eliminate persistent administrative rights from standard user accounts.
-
-* **Deploy Deception Technology:** Place honeypot files (fake bonus matrices, employee records) in HR directories to detect unauthorized access. Implement honeytoken credentials in registry/memory that trigger alerts if accessed or used.
-
-* **Conduct Adversary Emulation Exercises:** Perform purple team exercises simulating this attack pattern (credential compromise → lateral movement → data staging → exfiltration prep) to validate detection coverage and refine alerting thresholds. Test both technical controls and SOC analyst response procedures.
-
-* **Implement Zero Trust Architecture:** Transition to zero-trust principles requiring continuous authentication and authorization for all resource access. Remove implicit trust between departmental systems and implement least-privilege access controls for all data repositories.
-
-* **Enhance Security Awareness Training:** Develop targeted training for HR, Finance, and IT staff on social engineering techniques, suspicious file naming patterns, and proper handling of sensitive data. Include specific scenarios around fake "payroll support" or "bonus review" tools.
+**KQL Query Used:**
+```
+DeviceProcessEvents
+| where DeviceName == "azuki-sl"
+| where Timestamp between (startofday(datetime(2025-11-19)) .. endofday(datetime(2025-11-21)))
+| where ProcessCommandLine contains "add"
+| project Timestamp, FileName, DeviceName, InitiatingProcessFileName, ProcessCommandLine, InitiatingProcessCommandLine, FolderPath, AccountName, IsProcessRemoteSession
+```
+<img width="1678" height="135" alt="image" src="https://github.com/user-attachments/assets/656c2f22-51e3-44be-90d7-dee068d70c56" />
 
 ---
 
-## 🧾 Final Assessment
+### 🧹 Flag 19 – LATERAL MOVEMENT - Secondary Target
 
-This intrusion represents a **sophisticated, intelligence-driven data theft operation** executed by a capable threat actor with clear objectives, operational discipline, and advanced tradecraft. The attacker successfully compromised five systems across three departments over a 72-hour period, systematically identifying, accessing, and staging the organization's most sensitive HR compensation data while evading real-time detection.
+**Objective:**
+Lateral movement targets are selected based on their access to sensitive data or network privileges. Identifying these targets reveals attacker objectives.
 
-**Risk Severity: CRITICAL**
+**What to Hunt:**
+Examine the target system specified in remote access commands during lateral movement.Look for IP addresses used with cmdkey or mstsc commands near the end of the attack timeline.
+**IP Address Target:**
+10.1.0.188
 
-The compromise of approved bonus matrices, employee performance reviews, and candidate packages creates significant business risk including competitive intelligence loss, regulatory exposure under data protection laws, employee privacy violations, and potential for follow-on extortion or ransomware attacks. The attacker's establishment of dual persistence mechanisms and demonstrated ability to clear forensic logs indicates intent for long-term access rather than opportunistic data theft.
+Nov 20, 2025 2:10:41 AM
 
-**Attacker Sophistication: ADVANCED**
+**Why It Matters:**
+Targeting IP 10.1.0.188 shows the attacker’s next objective—likely a system with higher privileges or sensitive data. Mapping intended movement paths helps defenders prioritize protection and isolation of critical assets (MITRE ATT&CK T1021 – Remote Services).
 
-The adversary demonstrated capabilities consistent with sophisticated cybercrime groups, corporate espionage actors, or insider threats with technical expertise. Key indicators of advanced capability include: phased operations over multiple days, social engineering of filenames and task names to evade detection, operational security through off-hours activity, systematic lateral movement via internal pivot infrastructure, anti-forensic log clearing, and exfiltration pre-flight testing. This was not automated malware but rather hands-on-keyboard activity by a skilled operator.
-
-**Defensive Posture: INSUFFICIENT**
-
-Current defensive capabilities failed to detect or prevent this intrusion at multiple critical junctures. Detection gaps exist across initial access, lateral movement, persistence, data collection, and exfiltration preparation phases. The absence of behavioral analytics, sensitive data access monitoring, cross-system correlation, and real-time alerting on anti-forensic activity created an environment where a determined attacker could operate for days without interdiction.
-
-**Immediate Priorities:**
-
-1. **Containment:** Assume data exfiltration occurred and notify affected stakeholders, legal counsel, and potentially regulatory bodies
-2. **Eradication:** Complete credential rotation, persistence removal, and forensic imaging of all compromised systems
-3. **Recovery:** Implement emergency detections for similar attack patterns while longer-term improvements are developed
-4. **Lessons Learned:** Conduct comprehensive post-incident review to identify root causes and systemic defensive weaknesses
-
-The organization must treat this incident as a watershed moment requiring fundamental improvements to identity and access management, data protection controls, network segmentation, and security monitoring capabilities. Without significant investment in detection engineering, behavioral analytics, and privileged access controls, similar intrusions will continue to succeed.
+**KQL Query Used:**
+```
+DeviceProcessEvents
+| where DeviceName == "azuki-sl"
+| where Timestamp between (startofday(datetime(2025-11-19)) .. endofday(datetime(2025-11-21)))
+| where ProcessCommandLine contains "mstsc"
+| project Timestamp, FileName, DeviceName, InitiatingProcessFileName, ProcessCommandLine, InitiatingProcessCommandLine, FolderPath, AccountName, IsProcessRemoteSession
+```
+<img width="1670" height="384" alt="image" src="https://github.com/user-attachments/assets/4381ab9d-2771-4b70-9a8f-e29989b3e882" />
 
 ---
+
+### 🧹 Flag 20 – LATERAL MOVEMENT - Remote Access Tool
+
+**Objective:**
+Built-in remote access tools are preferred for lateral movement as they blend with legitimate administrative activity. This technique is harder to detect than custom tools.
+**What to Hunt:**
+Search for remote desktop connection utilities executed near the end of the attack timeline. Look for processes launched with remote system names or IP addresses as arguments.
+**Remote Access Tool:**
+mstsc.exe
+Nov 20, 2025 2:10:41 AM
+
+**Why It Matters:**
+Using native mstsc.exe for RDP to the next target makes the activity look like legitimate administration. This blending is why restricting and logging internal RDP use, plus network segmentation, are key defenses (MITRE ATT&CK T1021.001 – Remote Desktop Protocol).
+
+**KQL Query Used:**
+```
+DeviceProcessEvents
+| where DeviceName == "azuki-sl"
+| where Timestamp between (startofday(datetime(2025-11-19)) .. endofday(datetime(2025-11-21)))
+| where ProcessCommandLine contains "mstsc"
+| project Timestamp, FileName, DeviceName, InitiatingProcessFileName, ProcessCommandLine, InitiatingProcessCommandLine, FolderPath, AccountName, IsProcessRemoteSession
+```
+<img width="1699" height="388" alt="image" src="https://github.com/user-attachments/assets/d0d87a69-2271-4ccb-b649-47e96ebb6bdb" />
+
+
+---
+
+### Intrusion Narrative Chain
+
+0 ➝ 1 🚩: Initial access often starts with remote services exposed to the internet. **Was RDP used from an external source to gain entry?**  
+*(Yes – successful RDP connection originated from external IP 88.97.178.12, establishing the initial foothold.)*
+
+1 ➝ 2 🚩: Once connected remotely, attackers rely on valid credentials to authenticate. **Was a legitimate user account compromised to complete the logon?**  
+*(Yes – the account kenji.sato was used for authentication, allowing the attacker to operate as a legitimate user.)*
+
+2 ➝ 3 🚩: With access secured, early discovery focuses on mapping the local network. **Did the attacker enumerate nearby systems to identify potential targets?**  
+*(Yes – arp -a was executed to discover devices on the local segment, revealing the network layout.)*
+
+3 ➝ 4 🚩: To avoid detection, attackers create non-obvious locations for their tools. **Was a hidden staging directory established for malware and payloads?**  
+*(Yes – C:\ProgramData\WindowsCache was created as a concealed directory for storing malicious files.)*
+
+4 ➝ 5 🚝: Weakening endpoint protection improves survival odds. **Were specific file extensions excluded from Windows Defender scanning?**  
+*(Yes – three extensions were added to Defender exclusions, preventing scans of attacker-chosen file types.)*
+
+5 ➝ 6 🚩: Further evasion involves protecting high-activity folders. **Was the temporary folder excluded from real-time protection?**  
+*(Yes – the Temp folder path was added to exclusions, creating a safe space for transient payloads.)*
+
+6 ➝ 7 🚩: Attackers frequently abuse built-in utilities to pull down additional tools. **Was certutil used to download malicious payloads?**  
+*(Yes – certutil.exe was leveraged to fetch external files while appearing administrative.)*
+
+7 ➝ 8 🚩: Persistence ensures access survives reboots. **Was a scheduled task created under a deceptive name?**  
+*(Yes – a task named “Windows Update Check” was registered to maintain access.)*
+
+8 ➝ 9 🚩: The task needs a target to execute. **Did the scheduled task point to a malicious binary in the staging directory?**  
+*(Yes – the task was configured to run svchost.exe from the hidden WindowsCache folder.)*
+
+9 ➝ 10 🚩: After landing, implants typically reach out to attacker infrastructure. **Did the malware send an initial beacon to a command-and-control server?**  
+*(Yes – outbound connection established to 78.141.196.6 on port 443, confirming C2 communication.)*
+
+10 ➝ 11 🚩: Blending C2 traffic with legitimate protocols evades network filters. **Was port 443 used to mask command-and-control activity?**  
+*(Yes – all C2 traffic flowed over HTTPS on port 443, indistinguishable from normal web traffic at the port level.)*
+
+11 ➝ 12 🚩: With a foothold and C2, attackers move to credential theft. **Was a known credential-dumping tool transferred to the host?**  
+*(Yes – a renamed Mimikatz binary mm.exe was downloaded and staged.)*
+
+12 ➝ 13 🚩: The tool is only useful when executed with specific modules. **Were LSASS memory extraction commands run to harvest credentials?**  
+*(Yes – mm.exe executed privilege::debug and sekurlsa::logonpasswords, successfully dumping credentials.)*
+
+13 ➝ 14 🚩: Stolen data must be organized before exfiltration. **Was collected information compressed into an archive for easier transfer?**  
+*(Yes – export-data.zip and similar archives were created in the staging directory containing recon output.)*
+
+14 ➝ 15 🚩: Attackers increasingly abuse trusted platforms for data theft. **Was a consumer cloud service used as the exfiltration channel?**  
+*(Yes – curl.exe uploaded the archive to Discord, leveraging a legitimate service to move data out.)*
+
+15 ➝ 16 🚩: Covering tracks is a priority before departure. **Were critical event logs cleared to remove forensic evidence?**  
+*(Yes – wevtutil.exe cleared the Security log first, erasing records of authentication and privilege use.)*
+
+16 ➝ 17 🚩: Long-term access requires fallback options. **Was a hidden local administrator account created for future use?**  
+*(Yes – a new account named “support” was added to the local Administrators group as a persistent backdoor.)*
+
+17 ➝ 18 🚩: Automation drives efficiency in post-compromise activity. **Was a PowerShell script used to orchestrate the attack chain?**  
+*(Yes – wupdate.ps1 served as the primary execution payload that automated most observed actions.)*
+
+18 ➝ 19 🚩: With credentials and data in hand, attackers pivot deeper. **Did the attacker target a specific internal system for lateral movement?**  
+*(Yes – RDP connection initiated toward internal IP 10.1.0.188, indicating the next high-value target.)*
+
+19 ➝ 20 🚩: Native tools help lateral movement blend with admin activity. **Was the built-in Remote Desktop client used to attempt the pivot?**  
+*(Yes – mstsc.exe was launched with arguments pointing to the secondary target, using legitimate RDP for movement.)*
