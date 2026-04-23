@@ -9,9 +9,9 @@ COMPANY: Azuki Import/Export Trading Co. - 23 employees, shipping logistics Japa
 <br>
 EVIDENCE AVAILABLE: Microsoft Defender for Endpoint logs
 <br>
-Analyst: Fredrick Wilson
+Analyst: Jr Buggs
 <br>
-Date Completed: 11/25/2025
+Date Completed: 04/22/2026
 <br>
 Environment Investigated: 
 Azure Logs via Microsoft Defender
